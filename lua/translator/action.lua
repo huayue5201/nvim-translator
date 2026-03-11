@@ -1,7 +1,5 @@
--- FileName: action.lua
--- Author: voldikss <dyzplus@gmail.com> (translated to Lua)
--- GitHub: https://github.com/voldikss
--- Description: Action module for translator plugin
+-- File: lua/translator/action.lua
+-- Modern Neovim-native action module
 
 local util = require("translator.util")
 local logger = require("translator.logger")
@@ -9,111 +7,135 @@ local window = require("translator.window")
 
 local M = {}
 
-local MARKER = "• "
+local MARK = "• "
 
-function M.window(translations)
-	local content = {}
+---------------------------------------------------------------------
+-- Build window content
+---------------------------------------------------------------------
+local function build_window_content(trans)
+	local out = {}
 
-	-- 处理原文，如果太长就截断
-	local text = translations["text"]
-	if #text > 30 then
-		text = string.sub(text, 1, 30) .. "..."
+	-- 原文（自动截断）
+	local text = trans.text
+	if #text > 60 then
+		text = text:sub(1, 60) .. "..."
 	end
-	table.insert(content, string.format("⟦ %s ⟧", text))
+	table.insert(out, "⟦ " .. text .. " ⟧")
 
-	-- 遍历每个翻译引擎的结果
-	for _, t in ipairs(translations["results"]) do
-		-- 如果 paraphrase 和 explains 都为空，跳过
-		if (not t.paraphrase or t.paraphrase == "") and (not t.explains or #t.explains == 0) then
-			goto continue
-		end
+	for _, t in ipairs(trans.results) do
+		local has_content = (t.paraphrase and t.paraphrase ~= "") or (t.explains and #t.explains > 0)
 
-		table.insert(content, "")
-		table.insert(content, string.format("─── %s ───", t.engine))
+		if has_content then
+			table.insert(out, "")
+			table.insert(out, "─── " .. t.engine .. " ───")
 
-		-- 添加音标
-		if t.phonetic and t.phonetic ~= "" then
-			local phonetic = MARKER .. string.format("[%s]", t.phonetic)
-			table.insert(content, phonetic)
-		end
+			if t.phonetic and t.phonetic ~= "" then
+				table.insert(out, MARK .. "[" .. t.phonetic .. "]")
+			end
 
-		-- 添加释义
-		if t.paraphrase and t.paraphrase ~= "" then
-			table.insert(content, MARKER .. t.paraphrase)
-		end
+			if t.paraphrase and t.paraphrase ~= "" then
+				for line in t.paraphrase:gmatch("[^\n]+") do
+					table.insert(out, MARK .. util.safe_trim(line))
+				end
+			end
 
-		-- 添加解释列表
-		if t.explains and #t.explains > 0 then
-			for _, expl in ipairs(t.explains) do
-				local trimmed = util.safe_trim(expl)
-				if trimmed ~= "" then
-					table.insert(content, MARKER .. trimmed)
+			if t.explains then
+				for _, e in ipairs(t.explains) do
+					local trimmed = util.safe_trim(e)
+					if trimmed ~= "" then
+						table.insert(out, MARK .. trimmed)
+					end
 				end
 			end
 		end
-
-		::continue::
 	end
 
+	return out
+end
+
+---------------------------------------------------------------------
+-- Window display
+---------------------------------------------------------------------
+function M.window(trans)
+	local content = build_window_content(trans)
 	logger.log(content)
 	window.open(content)
 end
 
-function M.echo(translations)
+---------------------------------------------------------------------
+-- Echo display
+---------------------------------------------------------------------
+function M.echo(trans)
 	local phonetic = ""
 	local paraphrase = ""
 	local explains = ""
 
-	-- 从第一个非空的结果中获取信息
-	for _, t in ipairs(translations["results"]) do
-		if t.phonetic and t.phonetic ~= "" and phonetic == "" then
-			phonetic = string.format("[%s]", t.phonetic)
+	for _, t in ipairs(trans.results) do
+		if phonetic == "" and t.phonetic and t.phonetic ~= "" then
+			phonetic = "[" .. t.phonetic .. "]"
 		end
-		if t.paraphrase and t.paraphrase ~= "" and paraphrase == "" then
+		if paraphrase == "" and t.paraphrase and t.paraphrase ~= "" then
 			paraphrase = t.paraphrase
 		end
-		if t.explains and #t.explains > 0 and explains == "" then
+		if explains == "" and t.explains and #t.explains > 0 then
 			explains = table.concat(t.explains, " ")
 		end
 	end
 
-	-- 处理原文，如果太长就截断
-	local text = translations["text"]
-	if #text > 30 then
-		text = string.sub(text, 1, 30) .. "..."
+	local text = trans.text
+	if #text > 40 then
+		text = text:sub(1, 40) .. "..."
 	end
 
-	-- 在命令行显示
 	util.echo("Function", text)
 	util.echon("Constant", "==>")
-	util.echon("Type", phonetic)
-	util.echon("Normal", paraphrase)
-	util.echon("Normal", explains)
+	if phonetic ~= "" then
+		util.echon("Type", phonetic)
+	end
+	if paraphrase ~= "" then
+		util.echon("Normal", paraphrase)
+	end
+	if explains ~= "" then
+		util.echon("Normal", explains)
+	end
 end
 
-function M.replace(translations)
-	-- 查找第一个非空的 paraphrase 替换选中文本
-	for _, t in ipairs(translations["results"]) do
+---------------------------------------------------------------------
+-- Replace selected text
+---------------------------------------------------------------------
+function M.replace(trans)
+	local replacement = nil
+
+	for _, t in ipairs(trans.results) do
 		if t.paraphrase and t.paraphrase ~= "" then
-			-- 保存寄存器 a 的当前值
-			local reg_tmp = vim.fn.getreg("a")
-			local reg_type = vim.fn.getregtype("a")
-
-			-- 将 paraphrase 放入寄存器 a
-			vim.fn.setreg("a", t.paraphrase, "c")
-
-			-- 替换选中的文本
-			vim.cmd('normal! gv"ap')
-
-			-- 恢复寄存器 a
-			vim.fn.setreg("a", reg_tmp, reg_type)
-
-			return
+			replacement = t.paraphrase
+			break
 		end
 	end
 
-	-- 如果没有找到可替换的内容
-	util.show_msg("No paraphrases for the replacement", "warning")
+	if not replacement then
+		util.show_msg("No paraphrase available for replacement", "warning")
+		return
+	end
+
+	-- 使用 Neovim 原生 API 替换选区
+	local mode = vim.fn.visualmode()
+	local start = vim.fn.getpos("'<")
+	local finish = vim.fn.getpos("'>")
+
+	local srow = start[2] - 1
+	local scol = start[3] - 1
+	local erow = finish[2] - 1
+	local ecol = finish[3] - 1 -- ← 修复这里
+
+	if erow < srow or (erow == srow and ecol < scol) then
+		srow, erow = erow, srow
+		scol, ecol = ecol, scol
+	end
+
+	local lines = vim.split(replacement, "\n")
+
+	vim.api.nvim_buf_set_text(0, srow, scol, erow, ecol + 1, lines)
 end
 
 return M
