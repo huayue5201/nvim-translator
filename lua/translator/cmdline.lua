@@ -1,168 +1,130 @@
--- FileName: cmdline.lua
--- Author: voldikss <dyzplus@gmail.com> (translated to Lua)
--- GitHub: https://github.com/voldikss
--- Description: Command line module for translator plugin
+-- File: lua/translator/cmdline.lua
+-- Modern Neovim-native command line parser for translator.nvim
 
 local util = require("translator.util")
-local logger = require("translator.logger")
-
 local M = {}
 
--- 查找最后一个匹配位置
-local function match_last_pos(expr, pat)
-	local pos = -1
-	local start = 1
-	while true do
-		local p = string.find(expr, pat, start, true) -- true 表示 plain 匹配
-		if not p then
-			break
-		end
-		pos = p
-		start = p + 1
-	end
-	return pos
-end
-
-function M.parse(bang, range, line1, line2, argstr)
-	logger.log(argstr)
-
-	local options = {
+---------------------------------------------------------------------
+-- Parse command line arguments
+---------------------------------------------------------------------
+function M.parse(bang, _range, _line1, _line2, argstr)
+	local opts = {
 		text = "",
 		engines = {},
-		target_lang = "",
 		source_lang = "",
+		target_lang = "",
 	}
 
-	local arglist = vim.fn.split(argstr)
+	-------------------------------------------------------------------
+	-- Split arguments safely
+	-------------------------------------------------------------------
+	local args = vim.split(argstr or "", "%s+", { trimempty = true })
 
-	if #arglist > 0 then
-		local c = 0
-		for i, arg in ipairs(arglist) do
-			if string.match(arg, "^%-%-.+%=.+$") then -- 匹配 --xxx=yyy 格式
-				local opt = vim.fn.split(arg, "=")
-				if #opt ~= 2 then
-					util.show_msg("Argument Error: No value given to option: " .. opt[1], "error")
-					return nil
-				end
-				local key = string.sub(opt[1], 3) -- 去掉开头的 '--'
-				local value = opt[2]
-
+	for _, arg in ipairs(args) do
+		if arg:match("^%-%-") then
+			local key, val = arg:match("^%-%-(.-)=(.+)$")
+			if key and val then
 				if key == "engines" then
-					options.engines = vim.fn.split(value, ",")
+					opts.engines = vim.split(val, ",", { trimempty = true })
 				else
-					options[key] = value
+					opts[key] = val
 				end
-				c = c + 1
-			else
-				-- 剩余部分都是文本
-				options.text = table.concat(arglist, " ", c + 1)
-				break
 			end
+		else
+			opts.text = argstr:match("%s(.+)$") or arg
+			break
 		end
 	end
 
-	-- 如果没有提供文本，从可视选择获取
-	if options.text == "" then
-		options.text = util.visual_select(range, line1, line2)
+	-------------------------------------------------------------------
+	-- If no text provided, use visual selection
+	-------------------------------------------------------------------
+	if opts.text == "" then
+		opts.text = util.get_visual_selection()
 	end
 
-	options.text = util.text_proc(options.text)
-	if options.text == "" then
+	opts.text = util.text_proc(opts.text)
+	if opts.text == "" then
 		return nil
 	end
 
-	-- 设置默认值
-	if #options.engines == 0 then
-		options.engines = vim.g.translator_default_engines or { "google" }
+	-------------------------------------------------------------------
+	-- Defaults
+	-------------------------------------------------------------------
+	if #opts.engines == 0 then
+		opts.engines = vim.g.translator_default_engines or { "google" }
 	end
 
-	if options.target_lang == "" then
-		options.target_lang = vim.g.translator_target_lang or "zh"
+	opts.source_lang = opts.source_lang ~= "" and opts.source_lang or vim.g.translator_source_lang or "auto"
+	opts.target_lang = opts.target_lang ~= "" and opts.target_lang or vim.g.translator_target_lang or "zh"
+
+	-------------------------------------------------------------------
+	-- Bang (!) swaps languages
+	-------------------------------------------------------------------
+	if bang and opts.source_lang ~= "auto" then
+		opts.source_lang, opts.target_lang = opts.target_lang, opts.source_lang
 	end
 
-	if options.source_lang == "" then
-		options.source_lang = vim.g.translator_source_lang or "auto"
-	end
-
-	-- 如果使用了 !，交换源语言和目标语言
-	if bang and options.source_lang ~= "auto" then
-		options.source_lang, options.target_lang = options.target_lang, options.source_lang
-	end
-
-	return options
+	return opts
 end
 
+---------------------------------------------------------------------
+-- Command completion
+---------------------------------------------------------------------
 function M.complete(arg_lead, cmd_line, cursor_pos)
-	local opts_key = { "--engines=", "--target_lang=", "--source_lang=" }
-	local candidates = vim.tbl_map(function(key)
-		return key
-	end, opts_key) -- 复制一份
+	local options = {
+		"--engines=",
+		"--source_lang=",
+		"--target_lang=",
+	}
 
-	-- 获取光标前的命令行
-	local cmd_line_before_cursor = string.sub(cmd_line, 1, cursor_pos)
-	local args = vim.fn.split(cmd_line_before_cursor, "\\v\\@<!(\\\\\\\\)*\\zs\\s+", 1)
-	table.remove(args, 1) -- 移除命令名
+	local engines = { "bing", "google", "haici", "youdao", "iciba", "sdcv", "trans" }
 
-	-- 移除已经使用的选项
-	for _, key in ipairs(opts_key) do
-		if string.find(cmd_line_before_cursor, key, 1, true) then
-			for i, k in ipairs(candidates) do
-				if k == key then
-					table.remove(candidates, i)
-					break
+	local before = cmd_line:sub(1, cursor_pos)
+	local args = vim.split(before, "%s+", { trimempty = true })
+	table.remove(args, 1) -- remove command name
+
+	if #args == 0 then
+		return options
+	end
+
+	local last = args[#args]
+
+	-- Complete engines list
+	if last:match("^%-%-engines=") then
+		local prefix = last:match("^%-%-engines=(.*)$") or ""
+		local used = vim.split(prefix, ",", { trimempty = true })
+
+		local unused = {}
+		for _, e in ipairs(engines) do
+			local found = false
+			for _, u in ipairs(used) do
+				if u == e then
+					found = true
 				end
 			end
-		end
-	end
-
-	-- 如果没有参数，返回所有候选
-	if #args == 0 then
-		return candidates
-	end
-
-	local prefix = args[#args]
-
-	if prefix == "" then
-		return candidates
-	end
-
-	local engines = { "bing", "google", "haici", "iciba", "sdcv", "trans", "youdao" }
-
-	-- 处理逗号分隔的引擎补全
-	if string.find(prefix, ",", 1, true) then
-		local pos = match_last_pos(prefix, ",")
-		local preprefix = string.sub(prefix, 1, pos)
-
-		-- 找出未使用的引擎
-		local unused_engines = {}
-		for _, e in ipairs(engines) do
-			if not string.find(prefix, e, 1, true) then
-				table.insert(unused_engines, e)
+			if not found then
+				table.insert(unused, e)
 			end
 		end
 
-		-- 构建候选
-		candidates = {}
-		for _, e in ipairs(unused_engines) do
-			table.insert(candidates, preprefix .. e)
+		local base = "--engines=" .. (prefix:match("^(.*,)") or "")
+		local out = {}
+		for _, e in ipairs(unused) do
+			table.insert(out, base .. e)
 		end
-	elseif string.find(prefix, "--engines=", 1, true) then
-		-- 补全引擎名
-		candidates = {}
-		for _, e in ipairs(engines) do
-			table.insert(candidates, "--engines=" .. e)
+		return out
+	end
+
+	-- Complete option keys
+	local out = {}
+	for _, opt in ipairs(options) do
+		if opt:find(last, 1, true) == 1 then
+			table.insert(out, opt)
 		end
 	end
 
-	-- 过滤匹配前缀的候选
-	local result = {}
-	for _, candidate in ipairs(candidates) do
-		if string.sub(candidate, 1, #prefix) == prefix then
-			table.insert(result, candidate)
-		end
-	end
-
-	return result
+	return out
 end
 
 return M

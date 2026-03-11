@@ -1,118 +1,110 @@
--- FileName: job.lua
--- Author: voldikss <dyzplus@gmail.com> (translated to Lua)
--- GitHub: https://github.com/voldikss
--- Description: Job control module for translator plugin
+-- File: lua/translator/job.lua
+-- Lua rewrite of job.vim
 
-local util = require("translator.util")
 local logger = require("translator.logger")
 local action = require("translator.action")
 local history = require("translator.history")
+local util = require("translator.util")
 
 local M = {}
 
--- 存储 stdout 数据
-local stdout_save = {}
+-- 缓存 stdout（用于 stderr fallback）
+local stdout_save = nil
 
--- 设置全局状态
-vim.g.translator_status = ""
-
--- 内部处理函数
-local function handle_output(type, data, event)
-	vim.g.translator_status = ""
-
-	-- Nvim 返回的是 table，拼接成字符串
-	local message
-	if type(data) == "table" then
-		message = table.concat(data, " ")
-	else
-		message = data
+---------------------------------------------------------------------
+-- 清理 Python 输出（去掉 u"xxx"，处理 \uXXXX）
+---------------------------------------------------------------------
+local function clean_message(msg)
+	if not msg or msg == "" then
+		return ""
 	end
 
-	-- 在 Nvim 中，这个函数会被执行两次，第一次返回数据，第二次返回空字符串
-	-- 检查数据值以防止重复处理
+	-- 去掉 Python2 的 u"xxx"
+	msg = msg:gsub('(:%s*[%[{])u(")', "%1%2")
+	msg = msg:gsub("(:%s*[%[{])u(')", "%1%2")
+
+	-- 转换 \uXXXX → UTF-8
+	msg = msg:gsub("\\u(%x%x%x%x)", function(hex)
+		local n = tonumber(hex, 16)
+		if n < 0x80 then
+			return string.char(n)
+		elseif n < 0x800 then
+			return string.char(0xC0 + math.floor(n / 0x40), 0x80 + (n % 0x40))
+		else
+			return string.char(0xE0 + math.floor(n / 0x1000), 0x80 + (math.floor(n / 0x40) % 0x40), 0x80 + (n % 0x40))
+		end
+	end)
+
+	return msg
+end
+
+---------------------------------------------------------------------
+-- 处理 stdout / stderr
+---------------------------------------------------------------------
+local function handle_output(displaymode, data, event)
+	if not data then
+		return
+	end
+
+	-- Neovim 返回 list，需要拼接
+	local message = table.concat(data, " ")
 	if util.safe_trim(message) == "" then
 		return
 	end
+
 	logger.log(message)
 
-	-- 1. 移除字符串前的 'u'
-	message = string.gsub(message, '(: |: [|{])(u)(")', "%1%3")
-	message = string.gsub(message, "(: |: [|{])(u)(')", "%1%3")
-	message = string.gsub(message, "(: |: [])(u)(')", "%1%3")
-
-	-- 2. 将 hex code 转换为普通字符
-	message = string.gsub(message, "\\u(%x%x%x%x)", function(hex)
-		return vim.fn.nr2char(tonumber("0x" .. hex))
-	end)
-
+	message = clean_message(message)
 	logger.log(message)
 
 	if event == "stdout" then
-		-- 解析返回的数据
-		local load, result = pcall(vim.fn.eval, message)
-		if not load then
-			util.show_msg("Failed to parse translation result", "error")
-			return
-		end
-		local translations = result
-
-		if type(translations) ~= "table" or not translations["status"] then
+		local ok, translations = pcall(vim.json.decode, message)
+		if not ok or not translations then
 			util.show_msg("Translation failed", "error")
 			return
 		end
 
 		stdout_save = translations
 
-		-- 根据类型执行不同动作
-		if type == "echo" then
+		if displaymode == "echo" then
 			action.echo(translations)
-		elseif type == "window" then
+		elseif displaymode == "window" then
 			action.window(translations)
-		else -- 'replace'
+		else
 			action.replace(translations)
 		end
 
-		-- 保存到历史记录
 		history.save(translations)
 	elseif event == "stderr" then
 		util.show_msg(message, "error")
-		if not vim.tbl_isempty(stdout_save) and type == "echo" then
+
+		if stdout_save and displaymode == "echo" then
 			action.echo(stdout_save)
 		end
 	end
 end
 
--- Neovim 的 stdout/stderr 回调
-local function on_stdout_nvim(type, job_id, data, event)
-	handle_output(type, data, event)
-end
-
--- Neovim 的 exit 回调
-local function on_exit_nvim(job_id, code, event)
-	-- 保持空函数，与原始行为一致
-end
-
-function M.jobstart(cmd, job_type)
+---------------------------------------------------------------------
+-- 启动 Python 进程
+---------------------------------------------------------------------
+function M.jobstart(cmd, displaymode)
+	stdout_save = nil
 	vim.g.translator_status = "translating"
-	stdout_save = {}
 
-	if vim.fn.has("nvim") == 1 then
-		-- Neovim 的 jobstart
-		local callback = {
-			on_stdout = function(job_id, data, event)
-				on_stdout_nvim(job_type, job_id, data, "stdout")
-			end,
-			on_stderr = function(job_id, data, event)
-				on_stdout_nvim(job_type, job_id, data, "stderr")
-			end,
-			on_exit = on_exit_nvim,
-		}
+	vim.fn.jobstart(cmd, {
+		stdout_buffered = true,
+		stderr_buffered = true,
 
-		vim.fn.jobstart(cmd, callback)
-	else
-		-- 由于你用的是 Neovim，这里只保留一个错误提示
-		util.show_msg("Vim is not supported in this Lua version", "error")
-	end
+		on_stdout = function(_, data)
+			vim.g.translator_status = ""
+			handle_output(displaymode, data, "stdout")
+		end,
+
+		on_stderr = function(_, data)
+			vim.g.translator_status = ""
+			handle_output(displaymode, data, "stderr")
+		end,
+	})
 end
 
 return M

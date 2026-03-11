@@ -1,100 +1,105 @@
--- FileName: history.lua
--- Author: voldikss <dyzplus@gmail.com> (translated to Lua)
--- GitHub: https://github.com/voldikss
--- Description: History module for translator plugin
+-- File: lua/translator/history.lua
+-- Neovim-native history module for translator.nvim
 
 local util = require("translator.util")
 
 local M = {}
 
--- 获取历史文件路径
-local function get_history_file_path()
-	-- 获取当前文件的绝对路径，然后向上找到项目根目录
-	local current_file = debug.getinfo(1, "S").source:sub(2) -- 去掉开头的 '@'
-	local history_file = current_file:gsub("lua/translator/history.lua$", "translation_history.data")
-	return history_file
-end
-
-local history_file = get_history_file_path() -- 改名为 history_file，不使用 s: 前缀
-
-local function padding_end(text, length)
-	local result = tostring(text)
-	local len = vim.fn.strchars(result)
-	if len < length then
-		result = result .. string.rep(" ", length - len)
+---------------------------------------------------------------------
+-- History file path
+---------------------------------------------------------------------
+local function history_path()
+	local dir = vim.fn.stdpath("data") .. "/translator"
+	if vim.fn.isdirectory(dir) == 0 then
+		vim.fn.mkdir(dir, "p")
 	end
-	return result
+	return dir .. "/history.txt"
 end
 
-function M.save(translations)
-	-- 检查是否启用历史记录
+local HISTORY = history_path()
+
+---------------------------------------------------------------------
+-- Format a history entry
+---------------------------------------------------------------------
+local function format_entry(text, trans)
+	local left = text
+	if #left > 30 then
+		left = left:sub(1, 30) .. "..."
+	end
+
+	local right = nil
+
+	for _, t in ipairs(trans.results) do
+		if t.explains and #t.explains > 0 then
+			right = t.explains[1]
+			break
+		elseif t.paraphrase and t.paraphrase ~= "" then
+			right = t.paraphrase
+			break
+		end
+	end
+
+	if not right then
+		return nil
+	end
+
+	return string.format("%-32s %s", left, right)
+end
+
+---------------------------------------------------------------------
+-- Save history
+---------------------------------------------------------------------
+function M.save(trans)
 	if not vim.g.translator_history_enable then
 		return
 	end
 
-	local text = translations["text"]
-	local item = nil
-
-	-- 遍历结果，找到合适的记录项
-	for _, t in ipairs(translations["results"]) do
-		local paraphrase = t["paraphrase"]
-		local explains = t["explains"]
-
-		if explains and #explains > 0 then
-			item = padding_end(text, 25) .. explains[1]
-			break
-		elseif paraphrase and paraphrase ~= "" and text:lower() ~= paraphrase:lower() then
-			item = padding_end(text, 25) .. paraphrase
-			break
-		else
-			return
-		end
-	end
-
-	if not item then
+	local entry = format_entry(trans.text, trans)
+	if not entry then
 		return
 	end
 
-	-- 确保文件存在
-	if vim.fn.filereadable(history_file) == 0 then
-		vim.fn.writefile({}, history_file)
+	-- Read existing history
+	local lines = {}
+	if vim.fn.filereadable(HISTORY) == 1 then
+		lines = vim.fn.readfile(HISTORY)
 	end
 
-	-- 读取现有历史记录
-	local trans_data = vim.fn.readfile(history_file)
-
-	-- 检查是否已存在
-	for _, line in ipairs(trans_data) do
-		if line:find(vim.pesc(text), 1, true) then
+	-- Avoid duplicates
+	for _, line in ipairs(lines) do
+		if line:find(vim.pesc(trans.text), 1, true) then
 			return
 		end
 	end
 
-	-- 追加新记录
-	local file = io.open(history_file, "a")
-	if file then
-		file:write(item .. "\n")
-		file:close()
+	-- Append
+	local f = io.open(HISTORY, "a")
+	if f then
+		f:write(entry .. "\n")
+		f:close()
 	end
 end
 
+---------------------------------------------------------------------
+-- Export history
+---------------------------------------------------------------------
 function M.export()
-	if vim.fn.filereadable(history_file) == 0 then
-		util.show_msg("History file not exist yet", "error")
+	if vim.fn.filereadable(HISTORY) == 0 then
+		util.show_msg("History file not found", "error")
 		return
 	end
 
-	-- 在新标签页中打开历史文件
-	vim.cmd("tabnew " .. history_file)
+	vim.cmd("tabnew " .. HISTORY)
 	vim.bo.filetype = "translator_history"
 
-	-- 设置语法高亮
+	-- Simple highlight
 	vim.cmd([[
-        syn match TranslateHistoryQuery #\v^.*\v%25v#
-        syn match TranslateHistoryTrans #\v%26v.*$#
-        hi def link TranslateHistoryQuery Keyword
-        hi def link TranslateHistoryTrans String
-    ]])
+    syn match TranslatorHistoryLeft /^\s*.\{1,32\}/
+    syn match TranslatorHistoryRight /\s\{2,}.*$/
+
+    hi def link TranslatorHistoryLeft Keyword
+    hi def link TranslatorHistoryRight String
+  ]])
 end
 
 return M

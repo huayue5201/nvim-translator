@@ -470,6 +470,49 @@ class YoudaoTranslator(BaseTranslator):
         return explains
 
 
+class BaiduTranslator(BaseTranslator):
+    def __init__(self):
+        super(BaiduTranslator, self).__init__("baidu")
+        self._url = "https://fanyi-api.baidu.com/api/trans/vip/translate"
+        # TODO:ref:87882c
+        self._appid = "你的APPID"
+        self._secret = "你的SECRET"
+
+    def sign(self, text, salt):
+        raw = self._appid + text + salt + self._secret
+        return self.md5sum(raw)
+
+    def translate(self, sl, tl, text, options=None):
+        salt = str(int(time.time()))
+        sign = self.sign(text, salt)
+
+        data = {
+            "q": text,
+            "from": sl,
+            "to": tl,
+            "appid": self._appid,
+            "salt": salt,
+            "sign": sign,
+        }
+
+        resp = self.http_post(self._url, data)
+        if not resp:
+            return None
+
+        try:
+            obj = json.loads(resp)
+        except:
+            return None
+
+        if "trans_result" not in obj:
+            return None
+
+        res = self.create_translation(sl, tl, text)
+        # 百度翻译只有 paraphrase，没有多行 explains
+        res["paraphrase"] = obj["trans_result"][0]["dst"]
+        return res
+
+
 class TranslateShell(BaseTranslator):
     def __init__(self):
         super(TranslateShell, self).__init__("trans")
@@ -574,6 +617,7 @@ ENGINES = {
     "sdcv": SdcvShell,
     "trans": TranslateShell,
     "youdao": YoudaoTranslator,
+    "baidu": BaiduTranslator,
 }
 
 

@@ -1,58 +1,77 @@
--- FileName: logger.lua
--- Author: voldikss <dyzplus@gmail.com> (translated to Lua)
--- GitHub: https://github.com/voldikss
--- Description: Logger module for translator plugin
+-- File: lua/translator/logger.lua
+-- Neovim-native logger for translator.nvim
 
 local M = {}
 
--- 存储日志的数组
-local log = {}
+-- In-memory log
+local LOG = {}
 
-function M.init()
-	log = {}
-end
-
+---------------------------------------------------------------------
+-- Append log entry
+---------------------------------------------------------------------
 function M.log(info)
-	-- 获取调用栈信息
-	local trace = debug.getinfo(2, "Sl").short_src .. ":" .. debug.getinfo(2, "l").currentline
-	local log_entry = {}
-	log_entry[trace] = info
-	table.insert(log, log_entry)
+	local trace = debug.getinfo(2, "Sl")
+	local src = (trace.short_src or "unknown") .. ":" .. (trace.currentline or 0)
+
+	table.insert(LOG, {
+		trace = src,
+		info = info,
+	})
 end
 
+---------------------------------------------------------------------
+-- Clear log
+---------------------------------------------------------------------
+function M.init()
+	LOG = {}
+end
+
+---------------------------------------------------------------------
+-- Open log window
+---------------------------------------------------------------------
 function M.open_log()
-	-- 垂直分割打开日志窗口
-	vim.cmd("bo vsplit vim-translator.log")
+	-- Create new tab
+	vim.cmd("tabnew")
+	local bufnr = vim.api.nvim_get_current_buf()
 
-	-- 设置缓冲区选项
-	vim.bo.buftype = "nofile"
-	vim.bo.commentstring = "@ %s"
+	-- Buffer options
+	vim.bo[bufnr].buftype = "nofile"
+	vim.bo[bufnr].bufhidden = "wipe"
+	vim.bo[bufnr].swapfile = false
+	vim.bo[bufnr].modifiable = true
+	vim.bo[bufnr].filetype = "translator_log"
 
-	-- 添加语法高亮匹配
-	vim.fn.matchadd("Constant", "\\v\\@.*$")
+	-- Build lines
+	local lines = {}
 
-	-- 清空当前缓冲区
-	vim.cmd("normal! ggdG")
+	for _, entry in ipairs(LOG) do
+		table.insert(lines, "@" .. entry.trace)
 
-	-- 写入日志内容
-	for _, log_entry in ipairs(log) do
-		for trace, info in pairs(log_entry) do
-			-- 写入追踪信息
-			vim.fn.append("$", "@" .. trace)
-
-			-- 根据类型写入信息
-			if type(info) == "table" then
-				vim.fn.append("$", vim.inspect(info))
-			else
-				vim.fn.append("$", tostring(info))
+		if type(entry.info) == "table" then
+			local s = vim.inspect(entry.info)
+			for line in s:gmatch("[^\n]+") do
+				table.insert(lines, line)
 			end
-
-			-- 添加空行分隔
-			vim.fn.append("$", "")
+		else
+			table.insert(lines, tostring(entry.info))
 		end
+
+		table.insert(lines, "")
 	end
 
-	-- 移动到文件开头
+	-- Write lines
+	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+	vim.bo[bufnr].modifiable = false
+
+	-- Highlight
+	vim.cmd([[
+    syn match TranslatorLogTrace /^@.*$/
+    syn match TranslatorLogInfo /^[^@].*$/
+
+    hi def link TranslatorLogTrace Keyword
+    hi def link TranslatorLogInfo String
+  ]])
+
 	vim.cmd("normal! gg")
 end
 

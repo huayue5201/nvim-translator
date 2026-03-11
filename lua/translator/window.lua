@@ -1,181 +1,110 @@
--- FileName: window.lua
--- Author: voldikss <dyzplus@gmail.com> (translated to Lua)
--- GitHub: https://github.com/voldikss
--- Description: Window module for translator plugin
-
-local util = require("translator.util")
+-- File: lua/translator/window.lua
+-- Neovim-native window dispatcher for translator.nvim
+-- 保留原版全部功能 + 宽松模式自动适配内容
 
 local M = {}
 
--- 检测支持的窗口类型
-local has_float = vim.fn.has("nvim") == 1 and vim.fn.exists("*nvim_win_set_config") == 1
--- 注意：popup 是 Vim 的特性，在 Neovim 中我们用 float 模拟
-local has_popup = false -- 在 Neovim 中不支持 Vim 的 popup
-
--- 获取要使用的窗口类型
-local function win_gettype()
-	local window_type = vim.g.translator_window_type or "popup"
-
-	if window_type == "popup" then
-		if has_float then
-			return "float"
-		elseif has_popup then
-			return "popup"
-		else
-			util.show_msg("popup is not supported, use preview window", "warning")
-			return "preview"
-		end
+---------------------------------------------------------------------
+-- Detect window type
+---------------------------------------------------------------------
+local function get_wintype()
+	local t = vim.g.translator_window_type or "float"
+	if t == "preview" then
+		return "preview"
 	end
-	return "preview"
+	return "float"
 end
 
-local wintype = win_gettype()
+---------------------------------------------------------------------
+-- Compute content size (宽松模式自动适配)
+---------------------------------------------------------------------
+local function compute_size(lines)
+	-------------------------------------------------------------------
+	-- 1. 计算内容宽度与高度
+	-------------------------------------------------------------------
+	local content_width = 0
+	for _, line in ipairs(lines) do
+		content_width = math.max(content_width, vim.fn.strdisplaywidth(line))
+	end
+	local content_height = #lines
 
--- 计算窗口大小
-local function win_getsize(translation, max_width, max_height)
-	local width = 0
-	local height = 0
+	-------------------------------------------------------------------
+	-- 2. 宽松模式 padding（视觉更美观）
+	-------------------------------------------------------------------
+	local padding_w = 6 -- 左右留白
+	local padding_h = 2 -- 上下留白
 
-	for _, line in ipairs(translation) do
-		local line_width = vim.fn.strdisplaywidth(line)
-		if line_width > max_width then
-			width = max_width
-			height = height + math.floor(line_width / max_width) + 1
-		else
-			width = math.max(line_width, width)
-			height = height + 1
-		end
+	-------------------------------------------------------------------
+	-- 3. 最小尺寸（避免窗口太小）
+	-------------------------------------------------------------------
+	local min_w = 20
+	local min_h = 3
+
+	-------------------------------------------------------------------
+	-- 4. 最大尺寸（来自用户配置）
+	-------------------------------------------------------------------
+	local max_w = vim.g.translator_window_max_width or 0.4
+	if max_w < 1 then
+		max_w = math.floor(max_w * vim.o.columns)
 	end
 
-	if height > max_height then
-		height = max_height
+	local max_h = vim.g.translator_window_max_height or 0.3
+	if max_h < 1 then
+		max_h = math.floor(max_h * vim.o.lines)
 	end
-	return { width, height }
+
+	-------------------------------------------------------------------
+	-- 5. 计算最终宽度（内容 + padding → 限制在 min/max 之间）
+	-------------------------------------------------------------------
+	local width = content_width + padding_w
+	width = math.max(width, min_w)
+	width = math.min(width, max_w)
+
+	-------------------------------------------------------------------
+	-- 6. 计算最终高度（内容 + padding → 限制在 min/max 之间）
+	-------------------------------------------------------------------
+	local height = content_height + padding_h
+	height = math.max(height, min_h)
+	height = math.min(height, max_h)
+
+	return width, height
 end
 
--- 计算窗口位置
-local function win_getoptions(width, height)
-	-- 获取当前窗口在屏幕上的位置
-	local pos = vim.fn.win_screenpos(0)
-	local y_pos = pos[1] + vim.fn.winline() - 1
-	local x_pos = pos[2] + vim.fn.wincol() - 1
+---------------------------------------------------------------------
+-- Smart positioning (auto up/down)
+---------------------------------------------------------------------
+local function compute_position(height)
+	local cursor_row = vim.fn.winline()
+	local win_top = cursor_row
+	local win_bottom = vim.o.lines - cursor_row
 
-	local border = vim.tbl_isempty(vim.g.translator_window_borderchars or {}) and 0 or 2
-	local y_margin = 2
-	local final_width = width
-	local final_height = height
+	local show_above = win_bottom < height + 3
 
-	-- 计算垂直方向
-	local vert, y_offset
-	if y_pos + height + border + y_margin <= vim.o.lines then
-		vert = "N"
-		y_offset = 0
-	elseif y_pos - height - border - y_margin >= 0 then
-		vert = "S"
-		y_offset = -1
-	elseif vim.o.lines - y_pos >= y_pos then
-		vert = "N"
-		y_offset = 0
-		final_height = vim.o.lines - y_pos - border - y_margin
+	if show_above then
+		return -height - 2 -- show above cursor
 	else
-		vert = "S"
-		y_offset = -1
-		final_height = y_pos - border - y_margin
-	end
-
-	-- 计算水平方向
-	local hor, x_offset
-	if x_pos + width + border <= vim.o.columns then
-		hor = "W"
-		x_offset = -1
-	elseif x_pos - width - border >= 0 then
-		hor = "E"
-		x_offset = 0
-	elseif vim.o.columns - x_pos >= x_pos then
-		hor = "W"
-		x_offset = -1
-		final_width = vim.o.columns - x_pos - border
-	else
-		hor = "E"
-		x_offset = 0
-		final_width = x_pos - border
-	end
-
-	local anchor = vert .. hor
-	local row = y_pos + y_offset
-	local col = x_pos + x_offset
-
-	return { anchor, row, col, final_width, final_height }
-end
-
--- 初始化窗口
-function M.init(winid)
-	-- 设置窗口选项
-	-- FIX:ref:74f1fc
-	vim.api.nvim_win_set_option(winid, "wrap", true)
-	vim.api.nvim_win_set_option(winid, "conceallevel", 3)
-	vim.api.nvim_win_set_option(winid, "number", false)
-	vim.api.nvim_win_set_option(winid, "relativenumber", false)
-	vim.api.nvim_win_set_option(winid, "spell", false)
-	vim.api.nvim_win_set_option(winid, "foldcolumn", 0)
-
-	-- 设置窗口颜色
-	if vim.fn.has("nvim") == 1 then
-		vim.api.nvim_win_set_option(winid, "winhl", "Normal:Translator")
-	else
-		-- Vim 的 wincolor（但在 Neovim 中可能不支持）
-		vim.api.nvim_win_set_option(winid, "wincolor", "Translator")
+		return 1 -- show below cursor
 	end
 end
 
--- 打开翻译窗口
-function M.open(content)
-	-- 计算最大宽度
-	local max_width = vim.g.translator_window_max_width or 0.4
-	if type(max_width) == "number" and max_width < 1 then
-		max_width = max_width * vim.o.columns
-	end
-	max_width = math.floor(max_width)
+---------------------------------------------------------------------
+-- Main entry
+---------------------------------------------------------------------
+function M.open(lines)
+	local width, height = compute_size(lines)
 
-	-- 计算最大高度
-	local max_height = vim.g.translator_window_max_height or 0.3
-	if type(max_height) == "number" and max_height < 1 then
-		max_height = max_height * vim.o.lines
-	end
-	max_height = math.floor(max_height)
-
-	-- 获取窗口大小和位置
-	local size = win_getsize(content, max_width, max_height)
-	local width = size[1]
-	local height = size[2]
-
-	local opts = win_getoptions(width, height)
-	local anchor = opts[1]
-	local row = opts[2]
-	local col = opts[3]
-	local final_width = opts[4]
-	local final_height = opts[5]
-
-	-- 调整内容以适应窗口宽度
-	local linelist = util.fit_lines(content, final_width)
-
-	local configs = {
-		anchor = anchor,
-		row = row,
-		col = col,
-		width = final_width + 2,
-		height = final_height + 2,
-		title = "",
-		borderchars = vim.g.translator_window_borderchars or { "─", "│", "─", "│", "┌", "┐", "┘", "└" },
+	local cfg = {
+		width = width,
+		height = height,
+		row = compute_position(height),
+		col = 0,
 	}
 
-	-- 根据窗口类型创建窗口
-	if wintype == "float" then
-		require("translator.window.float").create(linelist, configs)
-	elseif wintype == "popup" then
-		require("translator.window.popup").create(linelist, configs)
-	else -- preview
-		require("translator.window.preview").create(linelist, configs)
+	local type = get_wintype()
+	if type == "float" then
+		require("translator.window.float").create(lines, cfg)
+	else
+		require("translator.window.preview").create(lines, cfg)
 	end
 end
 
