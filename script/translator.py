@@ -474,7 +474,6 @@ class BaiduTranslator(BaseTranslator):
     def __init__(self):
         super(BaiduTranslator, self).__init__("baidu")
         self._url = "https://fanyi-api.baidu.com/api/trans/vip/translate"
-        # TODO:ref:87882c
         self._appid = "你的APPID"
         self._secret = "你的SECRET"
 
