@@ -1,13 +1,12 @@
 -- File: lua/translator/window/float.lua
--- Cursor-following double-border floating window
+-- Cursor-following floating window with double border
 
 local buffer = require("translator.buffer")
-local util = require("translator.util") -- ★ 新增：用于 fit_lines()
+local util = require("translator.util")
 local M = {}
 
 local state = {
-	outer = nil,
-	inner = nil,
+	win = nil,
 }
 
 local function win_valid(win)
@@ -15,19 +14,15 @@ local function win_valid(win)
 end
 
 local function close()
-	if win_valid(state.inner) then
-		pcall(vim.api.nvim_win_close, state.inner, true)
+	if win_valid(state.win) then
+		pcall(vim.api.nvim_win_close, state.win, true)
 	end
-	if win_valid(state.outer) then
-		pcall(vim.api.nvim_win_close, state.outer, true)
-	end
-	state.inner = nil
-	state.outer = nil
+	state.win = nil
 	pcall(vim.api.nvim_del_augroup_by_name, "translator_float_close")
 end
 
 function M.has_scroll()
-	return win_valid(state.inner)
+	return win_valid(state.win)
 end
 
 function M.scroll(forward, amount)
@@ -35,7 +30,7 @@ function M.scroll(forward, amount)
 		return "<Ignore>"
 	end
 	amount = amount or 1
-	vim.api.nvim_win_call(state.inner, function()
+	vim.api.nvim_win_call(state.win, function()
 		local key = forward and "<C-e>" or "<C-y>"
 		for _ = 1, amount do
 			vim.cmd("normal! " .. key)
@@ -47,53 +42,28 @@ end
 function M.create(lines, cfg)
 	close()
 
-	-------------------------------------------------------------------
-	-- ★ 在写入 buffer 之前对内容进行居中排版
-	-- 使用内层窗口宽度（cfg.width - 2）
-	-------------------------------------------------------------------
-	lines = util.fit_lines(lines, cfg.width - 2)
+	-- 对内容进行居中排版
+	lines = util.fit_lines(lines, cfg.width)
 
-	-------------------------------------------------------------------
-	-- 创建 buffer（内容已经经过居中处理）
-	-------------------------------------------------------------------
+	-- 创建 buffer
 	local bufnr = buffer.create_scratch_buf(lines)
 	buffer.init(bufnr)
 
-	-------------------------------------------------------------------
-	-- 外层窗口（double border）
-	-------------------------------------------------------------------
-	state.outer = vim.api.nvim_open_win(bufnr, false, {
+	-- 单层浮窗，使用 double border
+	state.win = vim.api.nvim_open_win(bufnr, false, {
 		relative = "cursor",
-		row = 1, -- 光标下方一行
+		row = 1,
 		col = 0,
 		width = cfg.width,
 		height = cfg.height,
 		style = "minimal",
-		border = "rounded",
+		border = "rounded", -- 直接使用双边框
 		focusable = false,
 		zindex = 50,
 	})
-	vim.api.nvim_win_set_option(state.outer, "winhl", "Normal:TranslatorBorder")
+	vim.api.nvim_win_set_option(state.win, "winhl", "Normal:Translator")
 
-	-------------------------------------------------------------------
-	-- 内层窗口（rounded border）
-	-------------------------------------------------------------------
-	state.inner = vim.api.nvim_open_win(bufnr, false, {
-		relative = "cursor",
-		row = 2, -- 比外层向内偏移 1 行
-		col = 1, -- 比外层向内偏移 1 列
-		width = cfg.width - 2,
-		height = cfg.height - 2,
-		style = "minimal",
-		border = "rounded",
-		focusable = false,
-		zindex = 60,
-	})
-	vim.api.nvim_win_set_option(state.inner, "winhl", "Normal:Translator")
-
-	-------------------------------------------------------------------
-	-- 自动关闭（严格 coc.nvim 风格）
-	-------------------------------------------------------------------
+	-- 自动关闭
 	local aug = vim.api.nvim_create_augroup("translator_float_close", { clear = true })
 	vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
 		group = aug,
@@ -103,7 +73,7 @@ function M.create(lines, cfg)
 		end,
 	})
 
-	return state.inner, state.outer
+	return state.win
 end
 
 M.close = close
