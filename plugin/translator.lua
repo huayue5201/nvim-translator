@@ -1,5 +1,4 @@
--- FileName: translator.lua
--- FilePath: plugin/translator.lua
+-- File: plugin/translator.lua
 -- Description: Main plugin file for translator.nvim (Neovim-native)
 
 if vim.g.loaded_translator then
@@ -47,29 +46,15 @@ end
 vim.g.translator_status = ""
 
 ---------------------------------------------------------------------
--- Keymaps
----------------------------------------------------------------------
-vim.keymap.set("n", "<Plug>Translate", "<cmd>Translate<CR>", { silent = true })
-vim.keymap.set("n", "<Plug>TranslateW", "<cmd>TranslateW<CR>", { silent = true })
-vim.keymap.set("n", "<Plug>TranslateR", "viw:<C-u>TranslateR<CR>", { silent = true })
-vim.keymap.set("n", "<Plug>TranslateX", "<cmd>TranslateX<CR>", { silent = true })
-
-vim.keymap.set("v", "<Plug>TranslateV", "<cmd>Translate<CR>", { silent = true })
-vim.keymap.set("v", "<Plug>TranslateWV", "<cmd>TranslateW<CR>", { silent = true })
-vim.keymap.set("v", "<Plug>TranslateRV", "<cmd>TranslateR<CR>", { silent = true })
-
----------------------------------------------------------------------
 -- Helper: detect visual mode
 ---------------------------------------------------------------------
 local function get_text_from_context(opts)
 	local util = require("translator.util")
 
 	if vim.fn.mode():match("[vV\22]") then
-		-- Visual mode: always use Neovim-native selection
 		return util.get_visual_selection()
 	end
 
-	-- Normal mode
 	if opts.range == 0 then
 		return vim.fn.expand("<cword>")
 	elseif opts.range == 1 then
@@ -81,43 +66,30 @@ local function get_text_from_context(opts)
 end
 
 ---------------------------------------------------------------------
--- Commands
+-- Commands (FIXED: text is passed directly to translator.start)
 ---------------------------------------------------------------------
-vim.api.nvim_create_user_command("Translate", function(opts)
+local function run_translate(displaymode, opts)
 	local text = get_text_from_context(opts)
-	require("translator").start("echo", opts.bang, text, opts.args)
-end, {
-	nargs = "*",
-	bang = true,
-	range = true,
-})
+	require("translator").start(displaymode, opts.bang, text, opts.args)
+end
+
+vim.api.nvim_create_user_command("Translate", function(opts)
+	run_translate("echo", opts)
+end, { nargs = "*", bang = true, range = true })
 
 vim.api.nvim_create_user_command("TranslateW", function(opts)
-	local text = get_text_from_context(opts)
-	require("translator").start("window", opts.bang, text, opts.args)
-end, {
-	nargs = "*",
-	bang = true,
-	range = true,
-})
+	run_translate("window", opts)
+end, { nargs = "*", bang = true, range = true })
 
 vim.api.nvim_create_user_command("TranslateR", function(opts)
-	local text = get_text_from_context(opts)
-	require("translator").start("replace", opts.bang, text, opts.args)
-end, {
-	nargs = "*",
-	bang = true,
-	range = true,
-})
+	run_translate("replace", opts)
+end, { nargs = "*", bang = true, range = true })
 
 vim.api.nvim_create_user_command("TranslateX", function(opts)
 	local clipboard = vim.fn.getreg("*")
 	local args = opts.args ~= "" and (opts.args .. " " .. clipboard) or clipboard
 	require("translator").start("echo", opts.bang, clipboard, args)
-end, {
-	nargs = "*",
-	bang = true,
-})
+end, { nargs = "*", bang = true })
 
 vim.api.nvim_create_user_command("TranslateH", function()
 	require("translator.history").export()
