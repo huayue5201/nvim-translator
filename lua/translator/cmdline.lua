@@ -7,7 +7,7 @@ local M = {}
 ---------------------------------------------------------------------
 -- Parse command line arguments
 ---------------------------------------------------------------------
-function M.parse(bang, _range, _line1, _line2, argstr)
+function M.parse(bang, range, line1, line2, argstr)
 	local opts = {
 		text = "",
 		engines = {},
@@ -19,6 +19,7 @@ function M.parse(bang, _range, _line1, _line2, argstr)
 	-- Split arguments safely
 	-------------------------------------------------------------------
 	local args = vim.split(argstr or "", "%s+", { trimempty = true })
+	local texts = {}
 
 	for _, arg in ipairs(args) do
 		if arg:match("^%-%-") then
@@ -31,18 +32,17 @@ function M.parse(bang, _range, _line1, _line2, argstr)
 				end
 			end
 		else
-			opts.text = argstr:match("%s(.+)$") or arg
-			break
+			-- Collect non-flag arguments as text
+			table.insert(texts, arg)
 		end
 	end
+
+	opts.text = table.concat(texts, " ")
 
 	-------------------------------------------------------------------
 	-- If no text provided, use visual selection
 	-------------------------------------------------------------------
-	if opts.text == "" then
-		opts.text = util.get_visual_selection()
-	end
-
+	opts.text = opts.text ~= "" and opts.text or (util.get_visual_selection() or "")
 	opts.text = util.text_proc(opts.text)
 	if opts.text == "" then
 		return nil
@@ -51,23 +51,28 @@ function M.parse(bang, _range, _line1, _line2, argstr)
 	-------------------------------------------------------------------
 	-- Defaults
 	-------------------------------------------------------------------
+	-- Handle engines: global default or fallback
+	opts.engines = opts.engines or {}
 	if #opts.engines == 0 then
 		opts.engines = vim.g.translator_default_engines or { "google" }
+		if type(opts.engines) == "string" then
+			opts.engines = vim.split(opts.engines, ",", { trimempty = true })
+		end
 	end
 
+	-- Source/target language defaults
 	opts.source_lang = opts.source_lang ~= "" and opts.source_lang or vim.g.translator_source_lang or "auto"
 	opts.target_lang = opts.target_lang ~= "" and opts.target_lang or vim.g.translator_target_lang or "zh"
 
 	-------------------------------------------------------------------
 	-- Bang (!) swaps languages
 	-------------------------------------------------------------------
-	if bang and opts.source_lang ~= "auto" then
+	if bang then
 		opts.source_lang, opts.target_lang = opts.target_lang, opts.source_lang
 	end
 
 	return opts
 end
-
 ---------------------------------------------------------------------
 -- Command completion
 ---------------------------------------------------------------------

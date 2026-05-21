@@ -57,11 +57,16 @@ function M.create(lines, cfg)
 		width = cfg.width,
 		height = cfg.height,
 		style = "minimal",
-		border = "rounded", -- 直接使用双边框
+		border = "rounded",
 		focusable = false,
-		zindex = 50,
+		zindex = 100, -- 增加到 100 或更高
 	})
 	vim.api.nvim_win_set_option(state.win, "winhl", "Normal:Translator")
+
+	-- 可选：设置浮窗永远不被其他窗口覆盖（需要 Neovim 0.9+）
+	pcall(vim.api.nvim_win_set_config, state.win, {
+		zindex = 100,
+	})
 
 	-- 自动关闭
 	local aug = vim.api.nvim_create_augroup("translator_float_close", { clear = true })

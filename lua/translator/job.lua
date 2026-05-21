@@ -1,5 +1,4 @@
 -- File: lua/translator/job.lua
--- Lua rewrite of job.vim
 
 local logger = require("translator.logger")
 local action = require("translator.action")
@@ -8,22 +7,19 @@ local util = require("translator.util")
 
 local M = {}
 
--- 缓存 stdout（用于 stderr fallback）
 local stdout_save = nil
 
 ---------------------------------------------------------------------
--- 清理 Python 输出（去掉 u"xxx"，处理 \uXXXX）
+-- 清理 Python 输出
 ---------------------------------------------------------------------
 local function clean_message(msg)
 	if not msg or msg == "" then
 		return ""
 	end
 
-	-- 去掉 Python2 的 u"xxx"
 	msg = msg:gsub('(:%s*[%[{])u(")', "%1%2")
 	msg = msg:gsub("(:%s*[%[{])u(')", "%1%2")
 
-	-- 转换 \uXXXX → UTF-8
 	msg = msg:gsub("\\u(%x%x%x%x)", function(hex)
 		local n = tonumber(hex, 16)
 		if n < 0x80 then
@@ -39,15 +35,15 @@ local function clean_message(msg)
 end
 
 ---------------------------------------------------------------------
--- 处理 stdout / stderr
+-- FIXED: JSON 拼接
 ---------------------------------------------------------------------
 local function handle_output(displaymode, data, event)
 	if not data then
 		return
 	end
 
-	-- Neovim 返回 list，需要拼接
-	local message = table.concat(data, " ")
+	local message = table.concat(data, "\n")
+
 	if util.safe_trim(message) == "" then
 		return
 	end
@@ -55,10 +51,10 @@ local function handle_output(displaymode, data, event)
 	logger.log(message)
 
 	message = clean_message(message)
-	logger.log(message)
 
 	if event == "stdout" then
 		local ok, translations = pcall(vim.json.decode, message)
+
 		if not ok or not translations then
 			util.show_msg("Translation failed", "error")
 			return
@@ -84,9 +80,6 @@ local function handle_output(displaymode, data, event)
 	end
 end
 
----------------------------------------------------------------------
--- 启动 Python 进程
----------------------------------------------------------------------
 function M.jobstart(cmd, displaymode)
 	stdout_save = nil
 	vim.g.translator_status = "translating"

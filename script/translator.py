@@ -1,424 +1,160 @@
 # -*- coding: utf-8 -*-
-import re
+import json
 import threading
-import socket
-import sys
 import time
-import os
 import random
 import copy
-import json
-import argparse
-import codecs
+import sys
+import re
+import os
+from urllib.parse import quote_plus as url_quote, urlencode, urlparse
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
-if sys.version_info.major < 3:
-    is_py3 = False
-    reload(sys)
-    sys.setdefaultencoding("utf-8")
-    sys.stdout = codecs.getwriter("utf-8")(sys.stdout)
-    sys.stderr = codecs.getwriter("utf-8")(sys.stderr)
-    from urlparse import urlparse
-    from urllib import urlencode
-    from urllib import quote_plus as url_quote
-    from urllib2 import urlopen
-    from urllib2 import Request
-    from urllib2 import URLError
-    from urllib2 import HTTPError
-else:
-    is_py3 = True
-    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer)
-    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.buffer)
-    from urllib.parse import urlencode
-    from urllib.parse import quote_plus as url_quote
-    from urllib.parse import urlparse
-    from urllib.request import urlopen
-    from urllib.request import Request
-    from urllib.error import URLError
-    from urllib.error import HTTPError
+is_py3 = sys.version_info.major >= 3
 
 
-class BaseTranslator(object):
+# ---------------- Base Translator ---------------- #
+class BaseTranslator:
     def __init__(self, name):
         self._name = name
         self._proxy_url = None
-        self._agent = (
-            "Mozilla/5.0 (X11; Linux x86_64; rv:50.0) Gecko/20100101 Firefox/50.0"
-        )
 
-    def request(self, url, data=None, post=False, header=None):
-        if header:
-            header = copy.deepcopy(header)
-        else:
-            header = {}
-            header["User-Agent"] = "Mozilla/5.0 (X11; Linux x86_64) \
-                    AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36"
+    def request(self, url, data=None, post=False, headers=None):
+        if headers is None:
+            headers = {"User-Agent": "Mozilla/5.0"}
+        data_bytes = None
+        if post and data:
+            data_bytes = urlencode(data).encode("utf-8")
+        elif data:
+            url += "?" + "&".join(f"{k}={url_quote(str(v))}" for k, v in data.items())
 
-        if post:
-            if data:
-                data = urlencode(data).encode("utf-8")
-        else:
-            if data:
-                query_string = urlencode(data)
-                url = url + "?" + query_string
-                data = None
-
-        req = Request(url, data, header)
-
+        req = Request(url, data_bytes, headers)
         try:
-            r = urlopen(req, timeout=5)
-        except (URLError, HTTPError, socket.timeout):
-            sys.stderr.write(
-                "Engine %s timed out, please check your network\n" % self._name
-            )
+            resp = urlopen(req, timeout=5)
+            charset = resp.headers.get_content_charset("utf-8")
+            return resp.read().decode(charset)
+        except (URLError, HTTPError, TimeoutError) as e:
+            sys.stderr.write(f"{self._name} request error: {e}\n")
             return None
-
-        if is_py3:
-            charset = r.headers.get_param("charset") or "utf-8"
-        else:
-            charset = r.headers.getparam("charset") or "utf-8"
-
-        r = r.read().decode(charset)
-        return r
-
-    def http_get(self, url, data=None, header=None):
-        return self.request(url, data, False, header)
-
-    def http_post(self, url, data=None, header=None):
-        return self.request(url, data, True, header)
 
     def set_proxy(self, proxy_url=None):
         try:
             import socks
+            import socket
         except ImportError:
             sys.stderr.write("pySocks module should be installed\n")
-            return None
-
-        try:
-            import ssl
-
-            ssl._create_default_https_context = ssl._create_unverified_context
-        except Exception:
-            pass
-
+            return
+        if not proxy_url:
+            return
         self._proxy_url = proxy_url
-
-        proxy_types = {
+        url_comp = urlparse(proxy_url)
+        proxy_type = {
             "http": socks.PROXY_TYPE_HTTP,
-            "socks": socks.PROXY_TYPE_SOCKS4,
+            "socks": socks.PROXY_TYPE_SOCKS5,
             "socks4": socks.PROXY_TYPE_SOCKS4,
             "socks5": socks.PROXY_TYPE_SOCKS5,
         }
-
-        url_component = urlparse(proxy_url)
-
-        proxy_args = {
-            "proxy_type": proxy_types[url_component.scheme],
-            "addr": url_component.hostname,
-            "port": url_component.port,
-            "username": url_component.username,
-            "password": url_component.password,
-        }
-
-        socks.set_default_proxy(**proxy_args)
+        socks.set_default_proxy(
+            proxy_type.get(url_comp.scheme, socks.PROXY_TYPE_HTTP),
+            url_comp.hostname,
+            url_comp.port,
+            True,
+            url_comp.username,
+            url_comp.password,
+        )
         socket.socket = socks.socksocket
 
-    def test_request(self, test_url):
-        print("test url: %s" % test_url)
-        print(self.request(test_url))
-
-    def create_translation(self, sl="auto", tl="auto", text=""):
-        res = {}
-        res["engine"] = self._name
-        res["sl"] = sl  # 来源语言
-        res["tl"] = tl  # 目标语言
-        res["text"] = text  # 需要翻译的文本
-        res["phonetic"] = ""  # 音标
-        res["paraphrase"] = ""  # 简单释义
-        res["explains"] = []  # 分行解释
-        return res
-
-    # 翻译结果：需要填充如下字段
-    def translate(self, sl, tl, text):
-        return self.create_translation(sl, tl, text)
-
-    def md5sum(self, text):
-        import hashlib
-
-        m = hashlib.md5()
-        if sys.version_info[0] < 3:
-            if isinstance(text, unicode):  # noqa: F821
-                text = text.encode("utf-8")
-        else:
-            if isinstance(text, str):
-                text = text.encode("utf-8")
-        m.update(text)
-        return m.hexdigest()
-
-    def html_unescape(self, text):
-        # https://stackoverflow.com/questions/2087370/decode-html-entities-in-python-string
-        # Python 3.4+
-        if sys.version_info[0] >= 3 and sys.version_info[1] >= 4:
-            import html
-
-            return html.unescape(text)
-        else:
-            try:
-                # Python 2.6-2.7
-                from HTMLParser import HTMLParser
-            except ImportError:
-                # Python 3
-                from html.parser import HTMLParser
-            h = HTMLParser()
-            return h.unescape(text)
-
-
-# NOTE: expired
-class BaicizhanTranslator(BaseTranslator):
-    def __init__(self):
-        super(BaicizhanTranslator, self).__init__("baicizhan")
-
     def translate(self, sl, tl, text, options=None):
-        url = "http://mall.baicizhan.com/ws/search"
-        req = {}
-        req["w"] = url_quote(text)
-        resp = self.http_get(url, req, None)
-        if not resp:
-            return None
-        try:
-            obj = json.loads(resp)
-        except:
-            return None
-
-        res = self.create_translation(sl, tl, text)
-        res["phonetic"] = self.get_phonetic(obj)
-        res["explains"] = self.get_explains(obj)
-        return res
-
-    def get_phonetic(self, obj):
-        return obj["accent"] if "accent" in obj else ""
-
-    def get_explains(self, obj):
-        return ["; ".join(obj["mean_cn"].split("\n"))] if "mean_cn" in obj else []
-
-
-class BingDict(BaseTranslator):
-    def __init__(self):
-        super(BingDict, self).__init__("bing")
-        self._url = "http://bing.com/dict/SerpHoverTrans"
-        self._cnurl = "http://cn.bing.com/dict/SerpHoverTrans"
-
-    def translate(self, sl, tl, text, options=None):
-        url = self._cnurl if "zh" in tl else self._url
-        url = url + "?q=" + url_quote(text)
-        headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
+        return {
+            "engine": self._name,
+            "sl": sl,
+            "tl": tl,
+            "text": text,
+            "phonetic": "",
+            "paraphrase": "",
+            "explains": [],
+            "alternative": [],
         }
-        resp = self.http_get(url, None, headers)
-        if not resp:
-            return None
-        res = self.create_translation(sl, tl, text)
-        res["phonetic"] = self.get_phonetic(resp)
-        res["explains"] = self.get_explains(resp)
-        return res
-
-    def get_phonetic(self, html):
-        if not html:
-            return ""
-        m = re.findall(r'<span class="ht_attr" lang=".*?">\[(.*?)\] </span>', html)
-        if not m:
-            return ""
-        return self.html_unescape(m[0].strip())
-
-    def get_explains(self, html):
-        if not html:
-            return []
-        m = re.findall(
-            r'<span class="ht_pos">(.*?)</span><span class="ht_trs">(.*?)</span>', html
-        )
-        expls = []
-        for item in m:
-            expls.append("%s %s" % item)
-        return expls
 
 
+# ---------------- Google ---------------- #
 class GoogleTranslator(BaseTranslator):
     def __init__(self):
-        super(GoogleTranslator, self).__init__("google")
+        super().__init__("google")
         self._host = "translate.googleapis.com"
-        self._cnhost = "translate.googleapis.com"
 
-    def get_url(self, sl, tl, qry):
-        http_host = self._cnhost if "zh" in tl else self._host
-        qry = url_quote(qry)
-        url = (
-            "https://{}/translate_a/single?client=gtx&sl={}&tl={}&dt=at&dt=bd&dt=ex&"
-            "dt=ld&dt=md&dt=qca&dt=rw&dt=rm&dt=ss&dt=t&q={}".format(
-                http_host, sl, tl, qry
-            )
+    def get_url(self, sl, tl, text):
+        return (
+            f"https://{self._host}/translate_a/single?client=gtx&sl={sl}&tl={tl}"
+            f"&dt=t&dt=bd&dt=ex&q={url_quote(text)}"
         )
-        return url
 
     def translate(self, sl, tl, text, options=None):
         url = self.get_url(sl, tl, text)
-        resp = self.http_get(url)
-        if not resp:
-            return None
+        resp_text = self.request(url)
+        res = super().translate(sl, tl, text)
+        if not resp_text:
+            return res
         try:
-            obj = json.loads(resp)
-        except:
-            return None
+            obj = json.loads(resp_text)
+        except Exception:
+            return res
 
-        res = self.create_translation(sl, tl, text)
-        res["paraphrase"] = self.get_paraphrase(obj)
-        res["explains"] = self.get_explains(obj)
-        res["phonetic"] = self.get_phonetic(obj)
-        res["detail"] = self.get_detail(obj)
-        res["alternative"] = self.get_alternative(obj)
+        try:
+            res["paraphrase"] = "".join([p[0] for p in obj[0] if p[0]])
+        except:
+            pass
+
+        explains = []
+        try:
+            if len(obj) > 1 and obj[1]:
+                for x in obj[1]:
+                    if not x or len(x) < 3 or x[2] is None:
+                        continue
+                    expl = f"[{x[0][0]}] " + ";".join(i[0] for i in x[2] if i)
+                    explains.append(expl)
+        except:
+            pass
+        res["explains"] = explains
+
+        alts = []
+        try:
+            if len(obj) > 5 and obj[5]:
+                base = res["paraphrase"]
+                for x in obj[5]:
+                    if not x or len(x) < 3 or x[2] is None:
+                        continue
+                    for i in x[2]:
+                        if i and i[0] != base:
+                            alts.append(f"* {i[0]}")
+        except:
+            pass
+        res["alternative"] = alts
+
+        try:
+            for x in obj[0]:
+                if len(x) >= 4 and x[3]:
+                    res["phonetic"] = x[3]
+                    break
+        except:
+            pass
         return res
 
-    def get_phonetic(self, obj):
-        for x in obj[0]:
-            if len(x) == 4:
-                return x[3]
-        return ""
 
-    def get_paraphrase(self, obj):
-        paraphrase = ""
-        for x in obj[0]:
-            if x[0]:
-                paraphrase += x[0]
-        return paraphrase
-
-    def get_explains(self, obj):
-        explains = []
-        if obj[1]:
-            for x in obj[1]:
-                expl = "[{}] ".format(x[0][0])
-                for i in x[2]:
-                    expl += i[0] + ";"
-                explains.append(expl)
-        return explains
-
-    def get_detail(self, resp):
-        if len(resp) < 13 or resp[12] is None:
-            return []
-        result = []
-        for x in resp[12]:
-            result.append("[{}]".format(x[0]))
-            for y in x[1]:
-                result.append("- {}".format(y[0]))
-                if len(y) >= 3:
-                    result.append("  * {}".format(y[2]))
-        return result
-
-    def get_alternative(self, resp):
-        if len(resp) < 6 or resp[5] is None:
-            return []
-        definition = self.get_paraphrase(resp)
-        result = []
-        for x in resp[5]:
-            # result.append('- {}'.format(x[0]))
-            for i in x[2]:
-                if i[0] != definition:
-                    result.append(" * {}".format(i[0]))
-        return result
-
-
-class HaiciDict(BaseTranslator):
-    def __init__(self):
-        super(HaiciDict, self).__init__("haici")
-
-    def translate(self, sl, tl, text, options=None):
-        url = "http://dict.cn/mini.php"
-        req = {}
-        req["q"] = url_quote(text)
-        resp = self.http_get(url, req)
-        if not resp:
-            return
-
-        res = self.create_translation(sl, tl, text)
-        res["phonetic"] = self.get_phonetic(resp)
-        res["explains"] = self.get_explains(resp)
-        return res
-
-    def get_phonetic(self, html):
-        m = re.findall(r"<span class='p'> \[(.*?)\]</span>", html)
-        return m[0] if m else ""
-
-    def get_explains(self, html):
-        m = re.findall(r'<div id="e">(.*?)</div>', html)
-        explains = []
-        for item in m:
-            for e in item.split("<br>"):
-                explains.append(e)
-        return explains
-
-
-# NOTE: deprecated
-class ICibaTranslator(BaseTranslator):
-    def __init__(self):
-        super(ICibaTranslator, self).__init__("iciba")
-
-    def translate(self, sl, tl, text, options=None):
-        url = "http://www.iciba.com/index.php"
-        req = {}
-        req["a"] = "getWordMean"
-        req["c"] = "search"
-        req["word"] = url_quote(text)
-        resp = self.http_get(url, req, None)
-        if not resp:
-            return None
-        try:
-            obj = json.loads(resp)
-            obj = obj["baesInfo"]["symbols"][0]
-        except:
-            return None
-
-        res = self.create_translation(sl, tl, text)
-        res["paraphrase"] = self.get_paraphrase(obj)
-        res["phonetic"] = self.get_phonetic(obj)
-        res["explains"] = self.get_explains(obj)
-        return res
-
-    def get_paraphrase(self, obj):
-        try:
-            return obj["parts"][0]["means"][0]
-        except:
-            return ""
-
-    def get_phonetic(self, obj):
-        return obj["ph_en"] if "ph_en" in obj else ""
-
-    def get_explains(self, obj):
-        parts = obj["parts"] if "parts" in obj else []
-        explains = []
-        for part in parts:
-            explains.append(part["part"] + ", ".join(part["means"]))
-        return explains
-
-
+# ---------------- Youdao ---------------- #
 class YoudaoTranslator(BaseTranslator):
     def __init__(self):
-        super(YoudaoTranslator, self).__init__("youdao")
-        self.url = "https://fanyi.youdao.com/translate_o"
-        self.D = "97_3(jkMYg@T[KZQmqjTK"
-        # 备用 self.D = "n%A-rKaT5fb[Gy?;N5@Tj"
-
-    def sign(self, text, salt):
-        s = "fanyideskweb" + text + salt + self.D
-        return self.md5sum(s)
+        super().__init__("youdao")
 
     def translate(self, sl, tl, text, options=None):
+        from hashlib import md5
+
         salt = str(int(time.time() * 1000) + random.randint(0, 10))
-        sign = self.sign(text, salt)
-        header = {
-            "Cookie": "OUTFOX_SEARCH_USER_ID=-2022895048@10.168.8.76;",
-            "Referer": "http://fanyi.youdao.com/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 6.2; rv:51.0) Gecko/20100101 Firefox/51.0",
-        }
+        s = "fanyideskweb" + text + salt + "97_3(jkMYg@T[KZQmqjTK"
+        sign = md5(s.encode("utf-8")).hexdigest()
         data = {
-            "i": url_quote(text),
+            "i": text,
             "from": sl,
             "to": tl,
             "smartresult": "dict",
@@ -427,304 +163,248 @@ class YoudaoTranslator(BaseTranslator):
             "sign": sign,
             "doctype": "json",
             "version": "2.1",
-            "keyfrom": "fanyi.web",
             "action": "FY_BY_CL1CKBUTTON",
-            "typoResult": "true",
         }
-        resp = self.http_post(self.url, data, header)
-        if not resp:
-            return
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "http://fanyi.youdao.com/",
+            "Cookie": "OUTFOX_SEARCH_USER_ID=-2022895048@10.168.8.76;",
+        }
+        resp_text = self.request(
+            "https://fanyi.youdao.com/translate_o", data, post=True, headers=headers
+        )
+        res = super().translate(sl, tl, text)
+        if not resp_text:
+            return res
         try:
-            obj = json.loads(resp)
+            obj = json.loads(resp_text)
         except:
-            return None
-
-        res = self.create_translation(sl, tl, text)
-        res["paraphrase"] = self.get_paraphrase(obj)
-        res["explains"] = self.get_explains(obj)
+            return res
+        try:
+            t = obj.get("translateResult")
+            res["paraphrase"] = ", ".join([m.get("tgt", "") for n in t for m in n])
+        except:
+            pass
+        try:
+            entries = obj.get("smartResult", {}).get("entries", [])
+            res["explains"] = [
+                e.replace("\r", "").replace("\n", "") for e in entries if e.strip()
+            ]
+        except:
+            pass
         return res
 
-    def get_paraphrase(self, obj):
-        translation = ""
-        t = obj.get("translateResult")
-        if t:
-            for n in t:
-                part = []
-                for m in n:
-                    x = m.get("tgt")
-                    if x:
-                        part.append(x)
-                if part:
-                    translation += ", ".join(part)
-        return translation
 
-    def get_explains(self, obj):
-        explains = []
-        if "smartResult" in obj:
-            smarts = obj["smartResult"]["entries"]
-            for entry in smarts:
-                if entry:
-                    entry = entry.replace("\r", "")
-                    entry = entry.replace("\n", "")
-                    explains.append(entry)
-        return explains
-
-
+# ---------------- Baidu ---------------- #
 class BaiduTranslator(BaseTranslator):
     def __init__(self):
-        super(BaiduTranslator, self).__init__("baidu")
-        self._url = "https://fanyi-api.baidu.com/api/trans/vip/translate"
-        self._appid = "你的APPID"
-        self._secret = "你的SECRET"
-
-    def sign(self, text, salt):
-        raw = self._appid + text + salt + self._secret
-        return self.md5sum(raw)
+        super().__init__("baidu")
 
     def translate(self, sl, tl, text, options=None):
-        salt = str(int(time.time()))
-        sign = self.sign(text, salt)
+        url = f"https://fanyi.baidu.com/sug"
+        data = {"kw": text}
+        resp_text = self.request(url, data, post=True)
+        res = super().translate(sl, tl, text)
+        if not resp_text:
+            return res
+        try:
+            obj = json.loads(resp_text)
+            items = obj.get("data", [])
+            res["explains"] = [i.get("v", "") for i in items if i.get("v")]
+        except:
+            pass
+        return res
 
-        data = {
-            "q": text,
-            "from": sl,
-            "to": tl,
-            "appid": self._appid,
-            "salt": salt,
-            "sign": sign,
-        }
 
-        resp = self.http_post(self._url, data)
+# ---------------- Bing ---------------- #
+class BingTranslator(BaseTranslator):
+    def __init__(self):
+        super().__init__("bing")
+
+    def translate(self, sl, tl, text, options=None):
+        url = f"https://www.bing.com/ttranslatev3?from={sl}&to={tl}&text={url_quote(text)}"
+        resp = self.request(url)
+        res = super().translate(sl, tl, text)
         if not resp:
-            return None
-
+            return res
         try:
             obj = json.loads(resp)
+            if obj and isinstance(obj, list):
+                data = obj[0]
+                res["paraphrase"] = data.get("translations", [{}])[0].get("text", "")
         except:
-            return None
-
-        if "trans_result" not in obj:
-            return None
-
-        res = self.create_translation(sl, tl, text)
-        # 百度翻译只有 paraphrase，没有多行 explains
-        res["paraphrase"] = obj["trans_result"][0]["dst"]
+            pass
         return res
 
 
+# ---------------- Baicizhan ---------------- #
+class BaicizhanTranslator(BaseTranslator):
+    def __init__(self):
+        super().__init__("baicizhan")
+
+    def translate(self, sl, tl, text, options=None):
+        url = "http://mall.baicizhan.com/ws/search"
+        data = {"w": url_quote(text)}
+        resp = self.request(url, data)
+        res = super().translate(sl, tl, text)
+        if not resp:
+            return res
+        try:
+            obj = json.loads(resp)
+            mean_cn = obj.get("mean_cn", "")
+            res["explains"] = [mean_cn] if mean_cn else []
+        except:
+            pass
+        return res
+
+
+# ---------------- Haici ---------------- #
+class HaiciTranslator(BaseTranslator):
+    def __init__(self):
+        super().__init__("haici")
+
+    def translate(self, sl, tl, text, options=None):
+        url = f"http://dict.cn/mini.php?q={url_quote(text)}"
+        resp = self.request(url)
+        res = super().translate(sl, tl, text)
+        if not resp:
+            return res
+        try:
+            items = re.findall(r'<div id="e">(.*?)</div>', resp)
+            explains = []
+            for item in items:
+                parts = item.split("<br>")
+                for p in parts:
+                    if p.strip():
+                        explains.append(p.strip())
+            res["explains"] = explains
+        except:
+            pass
+        return res
+
+
+# ---------------- ICiba ---------------- #
+class ICibaTranslator(BaseTranslator):
+    def __init__(self):
+        super().__init__("iciba")
+
+    def translate(self, sl, tl, text, options=None):
+        url = f"http://www.iciba.com/index.php?a=getWordMean&c=search&word={url_quote(text)}"
+        resp = self.request(url)
+        res = super().translate(sl, tl, text)
+        if not resp:
+            return res
+        try:
+            obj = json.loads(resp)
+            sym = obj.get("baesInfo", {}).get("symbols", [{}])[0]
+            explains = []
+            parts = sym.get("parts", [])
+            for p in parts:
+                for m in p.get("means", []):
+                    explains.append(f"{p.get('part', '')}: {m}")
+            res["explains"] = explains
+            res["phonetic"] = sym.get("ph_en", "")
+        except:
+            pass
+        return res
+
+
+# ---------------- Translate Shell ---------------- #
 class TranslateShell(BaseTranslator):
     def __init__(self):
-        super(TranslateShell, self).__init__("trans")
+        super().__init__("trans")
 
     def translate(self, sl, tl, text, options=None):
-        if not options:
-            options = []
-
-        if self._proxy_url:
-            options.append("-proxy {}".format(self._proxy_url))
-
-        default_opts = [
-            "-no-ansi",
-            "-no-theme",
-            "-show-languages n",
-            "-show-prompt-message n",
-            "-show-translation-phonetics n",
-            "-hl {}".format(tl),
-        ]
-        options = default_opts + options
-        source_lang = "" if sl == "auto" else sl
-        cmd = "trans {} {}:{} '{}'".format(" ".join(options), source_lang, tl, text)
-        run = os.popen(cmd)
-        lines = []
-        for line in run.readlines():
-            line = re.sub(r"[\t\n]", "", line)
-            line = re.sub(r"\v.*", "", line)
-            line = re.sub(r"^\s*", "", line)
-            lines.append(line)
-        res = self.create_translation(sl, tl, text)
-        res["explains"] = lines
-        run.close()
+        res = super().translate(sl, tl, text)
+        try:
+            cmd = f"trans -no-ansi -no-theme -show-languages n -show-prompt-message n -show-translation-phonetics n -hl {tl} '{text}'"
+            run = os.popen(cmd)
+            lines = [line.strip() for line in run.readlines() if line.strip()]
+            run.close()
+            res["explains"] = lines
+        except:
+            pass
         return res
 
 
-class SdcvShell(BaseTranslator):
+# ---------------- Sdcv ---------------- #
+class SdcvTranslator(BaseTranslator):
     def __init__(self):
-        super(SdcvShell, self).__init__("sdcv")
-
-    def get_dictionary(self, sl, tl, text):
-        """get dictionary of sdcv
-
-        :sl: source_lang
-        :tl: target_lang
-        :returns: dictionary
-
-        """
-        dictionary = ""
-        if sl == "":
-            try:
-                import langdetect
-            except ImportError:
-                sys.stderr.write("langdetect module should be installed\n")
-                return None
-            sl = langdetect.detect(text)
-
-        if (sl == "en") & (tl == "zh"):
-            dictionary = "朗道英汉字典5.0"
-        elif (sl == "zh_cn") & (tl == "en"):
-            dictionary = "朗道汉英字典5.0"
-        elif (sl == "en") & (tl == "ja"):
-            dictionary = "jmdict-en-ja"
-        elif (sl == "ja") & (tl == "en"):
-            dictionary = "jmdict-ja-en"
-        return dictionary
+        super().__init__("sdcv")
 
     def translate(self, sl, tl, text, options=None):
-        if not options:
-            options = []
-
-        if self._proxy_url:
-            options.append("-proxy {}".format(self._proxy_url))
-
-        source_lang = "" if sl == "auto" else sl
-        dictionary = self.get_dictionary(source_lang, tl, text)
-        if dictionary == "":
-            default_opts = []
-        else:
-            default_opts = [" ".join(["-u", dictionary])]
-        options = default_opts + options
-        cmd = "sdcv {} '{}'".format(" ".join(options), text)
-        run = os.popen(cmd)
-        lines = []
-        for line in run.readlines():
-            line = re.sub(r"^Found.*", "", line)
-            line = re.sub(r"^-->.*", "", line)
-            line = re.sub(r"^\s*", "", line)
-            line = re.sub(r"^\*", "", line)
-            lines.append(line)
-        res = self.create_translation(sl, tl, text)
-        res["explains"] = lines
-        run.close()
+        res = super().translate(sl, tl, text)
+        try:
+            cmd = f"sdcv -u '朗道英汉字典5.0' '{text}'"
+            run = os.popen(cmd)
+            lines = [
+                line.strip()
+                for line in run.readlines()
+                if line.strip()
+                and not line.startswith("-->")
+                and not line.startswith("*")
+            ]
+            run.close()
+            res["explains"] = lines
+        except:
+            pass
         return res
 
 
+# ---------------- Engines Map ---------------- #
 ENGINES = {
-    "baicizhan": BaicizhanTranslator,
-    "bing": BingDict,
-    "haici": HaiciDict,
     "google": GoogleTranslator,
-    "iciba": ICibaTranslator,
-    "sdcv": SdcvShell,
-    "trans": TranslateShell,
     "youdao": YoudaoTranslator,
     "baidu": BaiduTranslator,
+    "bing": BingTranslator,
+    "baicizhan": BaicizhanTranslator,
+    "haici": HaiciTranslator,
+    "iciba": ICibaTranslator,
+    "trans": TranslateShell,
+    "sdcv": SdcvTranslator,
 }
 
 
-def sanitize_input_text(text):
-    while True:
-        try:
-            text.encode()
-            break
-        except UnicodeEncodeError:
-            text = text[:-1]
-    return text
-
-
+# ---------------- Main Runner ---------------- #
 def main():
+    import argparse
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--engines", nargs="+", required=False, default=["google"])
-    parser.add_argument("--target_lang", required=False, default="zh")
-    parser.add_argument("--source_lang", required=False, default="en")
-    parser.add_argument("--proxy", required=False)
-    parser.add_argument("--options", type=str, default=None, required=False)
+    parser.add_argument("--engines", nargs="+", default=["google"])
+    parser.add_argument("--target_lang", default="zh")
+    parser.add_argument("--source_lang", default="en")
+    parser.add_argument("--proxy", default=None)
     parser.add_argument("text", nargs="+", type=str)
     args = parser.parse_args()
 
-    args.text = [sanitize_input_text(x) for x in args.text]
-
-    text = " ".join(args.text).strip("'").strip('"').strip()
-    text = re.sub(r"([a-z])([A-Z][a-z])", r"\1 \2", text)
-    text = re.sub(r"([a-zA-Z])_([a-zA-Z])", r"\1 \2", text).lower()
-    engines = args.engines
-    to_lang = args.target_lang
-    from_lang = args.source_lang
-    if args.options:
-        options = args.options.split(",")
-    else:
-        options = []
-
-    translation = {}
-    translation["text"] = text
-    translation["status"] = 1
-    translation["results"] = []
+    text = " ".join(args.text).strip()
+    translation = {"text": text, "status": 1, "results": []}
 
     def runner(translator):
-        res = translator.translate(from_lang, to_lang, text, options)
+        res = translator.translate(args.source_lang, args.target_lang, text)
         if res:
             translation["results"].append(copy.deepcopy(res))
         else:
             translation["status"] = 0
 
     threads = []
-    for e in engines:
+    for e in args.engines:
         cls = ENGINES.get(e)
         if not cls:
-            sys.stderr.write("Invalid engine name %s\n" % e)
             continue
-        translator = cls()
+        t_obj = cls()
         if args.proxy:
-            translator.set_proxy(args.proxy)
-
-        t = threading.Thread(target=runner, args=(translator,))
+            t_obj.set_proxy(args.proxy)
+        t = threading.Thread(target=runner, args=(t_obj,))
         threads.append(t)
 
-    list(map(lambda x: x.start(), threads))
-    list(map(lambda x: x.join(), threads))
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
-    sys.stdout.write(json.dumps(translation))
+    sys.stdout.write(json.dumps(translation, ensure_ascii=False))
 
 
 if __name__ == "__main__":
-
-    def test0():
-        t = BaseTranslator("test_proxy")
-        t.set_proxy("http://localhost:8087")
-        t.test_request("https://www.google.com")
-
-    def test1():
-        t = BaicizhanTranslator()
-        r = t.translate("", "zh", "naive")
-        print(r)
-
-    def test2():
-        t = BingDict()
-        r = t.translate("", "", "naive")
-        print(r)
-
-    def test3():
-        gt = GoogleTranslator()
-        r = gt.translate("auto", "zh", "filencodings")
-        print(r)
-
-    def test4():
-        t = HaiciDict()
-        r = t.translate("", "zh", "naive")
-        print(r)
-
-    def test5():
-        t = ICibaTranslator()
-        r = t.translate("", "", "naive")
-        print(r)
-
-    def test6():
-        t = TranslateShell()
-        r = t.translate("auto", "zh", "naive")
-        print(r)
-
-    def test7():
-        t = YoudaoTranslator()
-        r = t.translate("auto", "zh", "naive")
-        print(r)
-
-    # test3()
     main()
