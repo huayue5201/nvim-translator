@@ -47,13 +47,12 @@ function M.create(lines, cfg)
 
 	-- 创建 buffer
 	local bufnr = buffer.create_scratch_buf(lines)
-	buffer.init(bufnr)
 
 	-- 单层浮窗，使用 double border
 	state.win = vim.api.nvim_open_win(bufnr, false, {
 		relative = "cursor",
-		row = 1,
-		col = 0,
+		row = cfg.row,
+		col = cfg.col,
 		width = cfg.width,
 		height = cfg.height,
 		style = "minimal",

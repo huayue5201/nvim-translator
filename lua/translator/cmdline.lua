@@ -4,11 +4,8 @@
 local util = require("translator.util")
 local M = {}
 
----------------------------------------------------------------------
--- Parse command line arguments
----------------------------------------------------------------------
-function M.parse(bang, range, line1, line2, argstr)
-	local opts = {
+function M.parse(opts)
+	local options = {
 		text = "",
 		engines = {},
 		source_lang = "",
@@ -16,9 +13,9 @@ function M.parse(bang, range, line1, line2, argstr)
 	}
 
 	-------------------------------------------------------------------
-	-- Split arguments safely
+	-- Split arguments: --key=value flags vs. plain text
 	-------------------------------------------------------------------
-	local args = vim.split(argstr or "", "%s+", { trimempty = true })
+	local args = vim.split(opts.args or "", "%s+", { trimempty = true })
 	local texts = {}
 
 	for _, arg in ipairs(args) do
@@ -26,53 +23,59 @@ function M.parse(bang, range, line1, line2, argstr)
 			local key, val = arg:match("^%-%-(.-)=(.+)$")
 			if key and val then
 				if key == "engines" then
-					opts.engines = vim.split(val, ",", { trimempty = true })
+					options.engines = vim.split(val, ",", { trimempty = true })
 				else
-					opts[key] = val
+					options[key] = val
 				end
 			end
 		else
-			-- Collect non-flag arguments as text
 			table.insert(texts, arg)
 		end
 	end
 
-	opts.text = table.concat(texts, " ")
+	options.text = table.concat(texts, " ")
 
 	-------------------------------------------------------------------
-	-- If no text provided, use visual selection
+	-- Fall back to visual selection / range / cword when no text given
 	-------------------------------------------------------------------
-	opts.text = opts.text ~= "" and opts.text or (util.get_visual_selection() or "")
-	opts.text = util.text_proc(opts.text)
-	if opts.text == "" then
+	if options.text == "" then
+		options.text = util.get_text_from_context(opts)
+	end
+
+	options.text = util.text_proc(options.text)
+	if options.text == "" then
 		return nil
 	end
 
 	-------------------------------------------------------------------
 	-- Defaults
 	-------------------------------------------------------------------
-	-- Handle engines: global default or fallback
-	opts.engines = opts.engines or {}
-	if #opts.engines == 0 then
-		opts.engines = vim.g.translator_default_engines or { "google" }
-		if type(opts.engines) == "string" then
-			opts.engines = vim.split(opts.engines, ",", { trimempty = true })
+	if #options.engines == 0 then
+		options.engines = vim.g.translator_default_engines or { "google" }
+		if type(options.engines) == "string" then
+			options.engines = vim.split(options.engines, ",", { trimempty = true })
 		end
 	end
 
-	-- Source/target language defaults
-	opts.source_lang = opts.source_lang ~= "" and opts.source_lang or vim.g.translator_source_lang or "auto"
-	opts.target_lang = opts.target_lang ~= "" and opts.target_lang or vim.g.translator_target_lang or "zh"
+	options.source_lang = options.source_lang ~= ""
+			and options.source_lang
+		or vim.g.translator_source_lang
+		or "auto"
+	options.target_lang = options.target_lang ~= ""
+			and options.target_lang
+		or vim.g.translator_target_lang
+		or "zh"
 
 	-------------------------------------------------------------------
 	-- Bang (!) swaps languages
 	-------------------------------------------------------------------
-	if bang then
-		opts.source_lang, opts.target_lang = opts.target_lang, opts.source_lang
+	if opts.bang then
+		options.source_lang, options.target_lang = options.target_lang, options.source_lang
 	end
 
-	return opts
+	return options
 end
+
 ---------------------------------------------------------------------
 -- Command completion
 ---------------------------------------------------------------------
@@ -83,7 +86,18 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
 		"--target_lang=",
 	}
 
-	local engines = { "bing", "google", "haici", "youdao", "iciba", "sdcv", "trans" }
+	local engines = {
+		"baicizhan",
+		"baidu",
+		"bing",
+		"google",
+		"haici",
+		"iciba",
+		"llm",
+		"sdcv",
+		"trans",
+		"youdao",
+	}
 
 	local before = cmd_line:sub(1, cursor_pos)
 	local args = vim.split(before, "%s+", { trimempty = true })

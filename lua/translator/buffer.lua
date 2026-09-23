@@ -4,12 +4,13 @@
 local M = {}
 
 ---------------------------------------------------------------------
--- Create scratch buffer
+-- Create a scratch buffer for the translation window
 ---------------------------------------------------------------------
 function M.create_scratch_buf(lines)
 	local bufnr = vim.api.nvim_create_buf(false, true)
 
 	local opts = {
+		filetype = "translator",
 		buftype = "nofile",
 		bufhidden = "wipe",
 		swapfile = false,
@@ -26,23 +27,6 @@ function M.create_scratch_buf(lines)
 
 	vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
 	return bufnr
-end
-
----------------------------------------------------------------------
--- Initialize buffer for translator window
----------------------------------------------------------------------
-function M.init(bufnr)
-	local opts = {
-		filetype = "translator",
-		buftype = "nofile",
-		bufhidden = "wipe",
-		swapfile = false,
-		modifiable = false,
-	}
-
-	for opt, value in pairs(opts) do
-		vim.api.nvim_set_option_value(opt, value, { buf = bufnr })
-	end
 end
 
 return M

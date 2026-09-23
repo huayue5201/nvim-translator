@@ -24,13 +24,12 @@ function M.create(lines, cfg)
 	close()
 
 	local bufnr = buffer.create_scratch_buf(lines)
-	buffer.init(bufnr)
 
 	-------------------------------------------------------------------
 	-- Preview window (single border, fixed position)
 	-------------------------------------------------------------------
 	state.win = vim.api.nvim_open_win(bufnr, false, {
-		relative = "editor",
+		relative = "cursor",
 		row = cfg.row,
 		col = cfg.col,
 		width = cfg.width,

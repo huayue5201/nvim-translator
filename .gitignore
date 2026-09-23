@@ -1,0 +1,11 @@
+# Rust build artifacts
+rust/target/
+bin/translator
+
+# Python (legacy)
+__pycache__/
+*.pyc
+
+# misc
+*.o
+*.so

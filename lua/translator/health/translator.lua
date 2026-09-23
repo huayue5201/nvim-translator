@@ -1,64 +1,35 @@
--- File: lua/health/translator.lua
+-- File: lua/translator/health/translator.lua
 -- Neovim-native health check for translator.nvim
 
 local M = {}
 
 ---------------------------------------------------------------------
--- Check Python environment
+-- Check the Rust backend binary
 ---------------------------------------------------------------------
-local function check_python()
-	local python = nil
+local function check_binary()
+	local current = debug.getinfo(1, "S").source:sub(2)
+	local root = vim.fn.fnamemodify(current, ":h:h:h:h")
 
-	if vim.g.python3_host_prog and vim.fn.executable(vim.g.python3_host_prog) == 1 then
-		python = vim.g.python3_host_prog
-	elseif vim.fn.executable("python3") == 1 then
-		python = "python3"
-	elseif vim.fn.executable("python") == 1 then
-		python = "python"
-	else
-		vim.health.error("Python 3 is required but not found")
-		return
+	local candidates = {
+		root .. "/bin/translator",
+		root .. "/rust/target/release/translator",
+	}
+
+	for _, bin in ipairs(candidates) do
+		if vim.fn.executable(bin) == 1 then
+			vim.health.ok("Backend binary found: " .. bin)
+			return
+		end
 	end
 
-	-- Version check
-	local handle = io.popen(python .. " --version 2>&1")
-	local version = handle and handle:read("*a") or ""
-	if handle then
-		handle:close()
-	end
-
-	if version:match("Python 3") then
-		vim.health.ok("Python detected: " .. version:gsub("\n", ""))
-	else
-		vim.health.warn("Python 2 detected, Python 3 is required")
-	end
-
-	-- requests module
-	local check_script = [[
-import sys
-try:
-    import requests
-    print("OK")
-except ImportError:
-    print("Missing")
-]]
-
-	local cmd = string.format('%s -c "%s"', python, check_script:gsub('"', '\\"'))
-	local h = io.popen(cmd)
-	local result = h and h:read("*a") or ""
-	if h then
-		h:close()
-	end
-
-	if result:find("OK") then
-		vim.health.ok("Python module 'requests' installed")
-	else
-		vim.health.warn("Python module 'requests' missing", "Install with: pip install requests")
-	end
+	vim.health.error(
+		"Backend binary not found",
+		"Run `make build` in the plugin directory (requires Rust/cargo)."
+	)
 end
 
 ---------------------------------------------------------------------
--- Check proxy (bing/google require it)
+-- Check proxy (bing/google may require it)
 ---------------------------------------------------------------------
 local function check_proxy()
 	local proxy = vim.g.translator_proxy_url or ""
@@ -76,7 +47,7 @@ end
 function M.check()
 	vim.health.start("translator.nvim")
 
-	check_python()
+	check_binary()
 	check_proxy()
 
 	vim.health.ok("Neovim floating window support detected")

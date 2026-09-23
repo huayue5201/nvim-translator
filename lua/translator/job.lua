@@ -4,35 +4,12 @@ local logger = require("translator.logger")
 local action = require("translator.action")
 local history = require("translator.history")
 local util = require("translator.util")
+local state = require("translator.state")
 
 local M = {}
 
 local stdout_save = nil
-
----------------------------------------------------------------------
--- 清理 Python 输出
----------------------------------------------------------------------
-local function clean_message(msg)
-	if not msg or msg == "" then
-		return ""
-	end
-
-	msg = msg:gsub('(:%s*[%[{])u(")', "%1%2")
-	msg = msg:gsub("(:%s*[%[{])u(')", "%1%2")
-
-	msg = msg:gsub("\\u(%x%x%x%x)", function(hex)
-		local n = tonumber(hex, 16)
-		if n < 0x80 then
-			return string.char(n)
-		elseif n < 0x800 then
-			return string.char(0xC0 + math.floor(n / 0x40), 0x80 + (n % 0x40))
-		else
-			return string.char(0xE0 + math.floor(n / 0x1000), 0x80 + (math.floor(n / 0x40) % 0x40), 0x80 + (n % 0x40))
-		end
-	end)
-
-	return msg
-end
+local current_options = nil
 
 ---------------------------------------------------------------------
 -- FIXED: JSON 拼接
@@ -50,8 +27,6 @@ local function handle_output(displaymode, data, event)
 
 	logger.log(message)
 
-	message = clean_message(message)
-
 	if event == "stdout" then
 		local ok, translations = pcall(vim.json.decode, message)
 
@@ -61,6 +36,7 @@ local function handle_output(displaymode, data, event)
 		end
 
 		stdout_save = translations
+		state.set(translations, current_options)
 
 		if displaymode == "echo" then
 			action.echo(translations)
@@ -80,11 +56,12 @@ local function handle_output(displaymode, data, event)
 	end
 end
 
-function M.jobstart(cmd, displaymode)
+function M.jobstart(cmd, displaymode, env, options)
 	stdout_save = nil
+	current_options = options
 	vim.g.translator_status = "translating"
 
-	vim.fn.jobstart(cmd, {
+	local opts = {
 		stdout_buffered = true,
 		stderr_buffered = true,
 
@@ -97,7 +74,13 @@ function M.jobstart(cmd, displaymode)
 			vim.g.translator_status = ""
 			handle_output(displaymode, data, "stderr")
 		end,
-	})
+	}
+
+	if env then
+		opts.env = env
+	end
+
+	vim.fn.jobstart(cmd, opts)
 end
 
 return M

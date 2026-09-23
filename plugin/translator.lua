@@ -13,23 +13,22 @@ vim.g.translator_history_enable = vim.g.translator_history_enable or false
 vim.g.translator_proxy_url = vim.g.translator_proxy_url or ""
 vim.g.translator_source_lang = vim.g.translator_source_lang or "auto"
 vim.g.translator_target_lang = vim.g.translator_target_lang or "zh"
-vim.g.translator_translate_shell_options = vim.g.translator_translate_shell_options or {}
-
-vim.g.translator_window_borderchars = vim.g.translator_window_borderchars
-	or {
-		"─",
-		"│",
-		"─",
-		"│",
-		"┌",
-		"┐",
-		"┘",
-		"└",
-	}
 
 vim.g.translator_window_max_height = vim.g.translator_window_max_height or 999
 vim.g.translator_window_max_width = vim.g.translator_window_max_width or 999
 vim.g.translator_window_type = vim.g.translator_window_type or "popup"
+
+-- LLM config: { provider|base_url, api_key, model, prompt?, timeout? }
+-- Preset providers: deepseek, openai, ollama, qwen, kimi, doubao
+vim.g.translator_llm = vim.g.translator_llm or {}
+
+-- TTS: "say" (local, default) or "google" (online)
+vim.g.translator_tts_engine = vim.g.translator_tts_engine or "say"
+
+-- Anki (via AnkiConnect)
+vim.g.translator_anki_port = vim.g.translator_anki_port or 8765
+vim.g.translator_anki_deck = vim.g.translator_anki_deck or "翻译"
+vim.g.translator_anki_model = vim.g.translator_anki_model or "translator"
 
 if vim.g.translator_target_lang:match("zh") then
 	vim.g.translator_default_engines = vim.g.translator_default_engines
@@ -43,34 +42,11 @@ else
 	vim.g.translator_default_engines = vim.g.translator_default_engines or { "google" }
 end
 
-vim.g.translator_status = ""
-
 ---------------------------------------------------------------------
--- Helper: detect visual mode
----------------------------------------------------------------------
-local function get_text_from_context(opts)
-	local util = require("translator.util")
-
-	if vim.fn.mode():match("[vV\22]") then
-		return util.get_visual_selection()
-	end
-
-	if opts.range == 0 then
-		return vim.fn.expand("<cword>")
-	elseif opts.range == 1 then
-		return vim.api.nvim_get_current_line()
-	else
-		local lines = vim.api.nvim_buf_get_lines(0, opts.line1 - 1, opts.line2, false)
-		return table.concat(lines, "\n")
-	end
-end
-
----------------------------------------------------------------------
--- Commands (FIXED: text is passed directly to translator.start)
+-- Commands
 ---------------------------------------------------------------------
 local function run_translate(displaymode, opts)
-	local text = get_text_from_context(opts)
-	require("translator").start(displaymode, opts.bang, text, opts.args)
+	require("translator").start(displaymode, opts)
 end
 
 vim.api.nvim_create_user_command("Translate", function(opts)
@@ -87,8 +63,14 @@ end, { nargs = "*", bang = true, range = true })
 
 vim.api.nvim_create_user_command("TranslateX", function(opts)
 	local clipboard = vim.fn.getreg("*")
-	local args = opts.args ~= "" and (opts.args .. " " .. clipboard) or clipboard
-	require("translator").start("echo", opts.bang, clipboard, args)
+	local args = vim.trim((opts.args or "") .. " " .. clipboard)
+	require("translator").start("echo", {
+		bang = opts.bang,
+		range = 0,
+		line1 = 1,
+		line2 = 1,
+		args = args,
+	})
 end, { nargs = "*", bang = true })
 
 vim.api.nvim_create_user_command("TranslateH", function()
@@ -97,4 +79,12 @@ end, {})
 
 vim.api.nvim_create_user_command("TranslateL", function()
 	require("translator.logger").open_log()
+end, {})
+
+vim.api.nvim_create_user_command("TranslateSay", function(opts)
+	require("translator.tts").say(opts.bang, opts)
+end, { bang = true, range = true })
+
+vim.api.nvim_create_user_command("TranslateA", function()
+	require("translator.anki").add()
 end, {})

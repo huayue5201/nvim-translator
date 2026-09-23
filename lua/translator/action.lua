@@ -66,38 +66,44 @@ end
 -- Echo display
 ---------------------------------------------------------------------
 function M.echo(trans)
-	local phonetic = ""
-	local paraphrase = ""
-	local explains = ""
-
-	for _, t in ipairs(trans.results) do
-		if phonetic == "" and t.phonetic and t.phonetic ~= "" then
-			phonetic = "[" .. t.phonetic .. "]"
-		end
-		if paraphrase == "" and t.paraphrase and t.paraphrase ~= "" then
-			paraphrase = t.paraphrase
-		end
-		if explains == "" and t.explains and #t.explains > 0 then
-			explains = table.concat(t.explains, " ")
-		end
-	end
-
 	local text = trans.text
 	if #text > 40 then
 		text = text:sub(1, 40) .. "..."
 	end
 
-	util.echo("Function", text)
-	util.echon("Constant", "==>")
-	if phonetic ~= "" then
-		util.echon("Type", phonetic)
+	local chunks = {
+		{ text, "Function" },
+		{ " ==> ", "Constant" },
+	}
+
+	-- Show every engine that returned content, separated by a divider.
+	local first = true
+	for _, t in ipairs(trans.results) do
+		local has_content = (t.paraphrase and t.paraphrase ~= "")
+			or (t.explains and #t.explains > 0)
+			or (t.phonetic and t.phonetic ~= "")
+
+		if has_content then
+			if not first then
+				table.insert(chunks, { " │ ", "Comment" })
+			end
+			first = false
+
+			table.insert(chunks, { "[" .. t.engine .. "] ", "Identifier" })
+
+			if t.phonetic and t.phonetic ~= "" then
+				table.insert(chunks, { "[" .. t.phonetic .. "] ", "Type" })
+			end
+			if t.paraphrase and t.paraphrase ~= "" then
+				table.insert(chunks, { t.paraphrase .. " ", "Normal" })
+			end
+			if t.explains and #t.explains > 0 then
+				table.insert(chunks, { table.concat(t.explains, " "), "Normal" })
+			end
+		end
 	end
-	if paraphrase ~= "" then
-		util.echon("Normal", paraphrase)
-	end
-	if explains ~= "" then
-		util.echon("Normal", explains)
-	end
+
+	vim.api.nvim_echo(chunks, false, {})
 end
 
 ---------------------------------------------------------------------
@@ -119,9 +125,22 @@ function M.replace(trans)
 	end
 
 	-- 使用 Neovim 原生 API 替换选区
-	local mode = vim.fn.visualmode()
-	local start = vim.fn.getpos("'<")
-	local finish = vim.fn.getpos("'>")
+	local mode = vim.api.nvim_get_mode().mode
+	local start
+	local finish
+
+	if mode:match("^[vV\22]") then
+		start = vim.fn.getpos("v")
+		finish = vim.fn.getpos(".")
+	else
+		start = vim.fn.getpos("'<")
+		finish = vim.fn.getpos("'>")
+	end
+
+	if start[2] == 0 or finish[2] == 0 then
+		util.show_msg("No visual selection to replace", "warning")
+		return
+	end
 
 	local srow = start[2] - 1
 	local scol = start[3] - 1

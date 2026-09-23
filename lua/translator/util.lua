@@ -34,8 +34,7 @@ function M.safe_trim(text)
 end
 
 ---------------------------------------------------------------------
--- FIXED: 不再增加 shell quote
--- 因为 jobstart 使用 argv 方式调用 python
+-- Normalize text before sending to the backend (argv, no shell quoting).
 ---------------------------------------------------------------------
 function M.text_proc(text)
 	local t = text:gsub("\n", " ")
@@ -139,20 +138,7 @@ end
 ---------------------------------------------------------------------
 -- Visual selection (v / V / CTRL-V)
 ---------------------------------------------------------------------
-function M.get_visual_selection()
-	local mode = vim.api.nvim_get_mode().mode
-
-	if not mode:match("^[vV\22]") then
-		return ""
-	end
-
-	local start_pos = vim.fn.getpos("'<")
-	local end_pos = vim.fn.getpos("'>")
-
-	if not start_pos or not end_pos or start_pos[2] == 0 or end_pos[2] == 0 then
-		return ""
-	end
-
+local function manual_visual_selection(mode, start_pos, end_pos)
 	local srow = start_pos[2]
 	local scol = start_pos[3]
 	local erow = end_pos[2]
@@ -188,24 +174,86 @@ function M.get_visual_selection()
 		end
 
 		return table.concat(result, "\n")
+	elseif #lines == 1 then
+		return lines[1]:sub(scol, ecol)
 	else
-		if #lines == 1 then
-			return lines[1]:sub(scol, ecol)
-		else
-			local result_lines = {}
+		local result_lines = {}
 
-			result_lines[1] = lines[1]:sub(scol)
+		result_lines[1] = lines[1]:sub(scol)
 
-			for i = 2, #lines - 1 do
-				table.insert(result_lines, lines[i])
-			end
-
-			if #lines > 1 then
-				table.insert(result_lines, lines[#lines]:sub(1, ecol))
-			end
-
-			return table.concat(result_lines, "\n")
+		for i = 2, #lines - 1 do
+			table.insert(result_lines, lines[i])
 		end
+
+		if #lines > 1 then
+			table.insert(result_lines, lines[#lines]:sub(1, ecol))
+		end
+
+		return table.concat(result_lines, "\n")
+	end
+end
+
+function M.get_visual_selection()
+	local mode = vim.api.nvim_get_mode().mode
+	local start_pos
+	local end_pos
+	local vmode
+
+	if mode:match("^[vV\22]") then
+		-- Active visual mode (e.g. a v-mode keymap): the selection spans the
+		-- 'v' mark and the cursor. The '< '> marks are not set yet here.
+		vmode = mode
+		start_pos = vim.fn.getpos("v")
+		end_pos = vim.fn.getpos(".")
+	else
+		-- :command invoked from visual mode: mode is already "n", but
+		-- visualmode() still reports the type and '< '> are set.
+		vmode = vim.fn.visualmode()
+		if vmode == "" then
+			return ""
+		end
+		start_pos = vim.fn.getpos("'<")
+		end_pos = vim.fn.getpos("'>")
+	end
+
+	if not start_pos or not end_pos or start_pos[2] == 0 or end_pos[2] == 0 then
+		return ""
+	end
+
+	-- Prefer getregion() (Neovim 0.10+), it handles multibyte correctly.
+	if vim.fn.getregion then
+		local ok, region = pcall(vim.fn.getregion, start_pos, end_pos, { type = vmode })
+		if ok and type(region) == "table" and #region > 0 then
+			return table.concat(region, "\n")
+		end
+	end
+
+	return manual_visual_selection(vmode, start_pos, end_pos)
+end
+
+---------------------------------------------------------------------
+-- Extract text from the editing context: visual selection -> line range
+-- -> current line -> word under cursor.
+---------------------------------------------------------------------
+function M.get_text_from_context(opts)
+	if opts.range > 0 then
+		local s = vim.fn.getpos("'<")
+		local e = vim.fn.getpos("'>")
+		if s[2] == opts.line1 and e[2] == opts.line2 then
+			local sel = M.get_visual_selection()
+			if sel ~= "" then
+				return sel
+			end
+		end
+	end
+
+	if opts.range == 0 then
+		return vim.fn.expand("<cword>")
+	elseif opts.range == 1 then
+		return vim.api.nvim_get_current_line()
+	else
+		local lines = vim.api.nvim_buf_get_lines(0, opts.line1 - 1, opts.line2, false)
+		return table.concat(lines, "\n")
 	end
 end
 

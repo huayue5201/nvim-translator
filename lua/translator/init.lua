@@ -6,39 +6,135 @@ local job = require("translator.job")
 
 local M = {}
 
-local function get_python()
-	-- 使用 vim.fn.executable 是 Neovim 原生方法，没问题
-	-- vim.g 也是 Neovim 原生
-	if vim.g.python3_host_prog and vim.fn.executable(vim.g.python3_host_prog) == 1 then
-		return vim.g.python3_host_prog
-	elseif vim.fn.executable("python3") == 1 then
-		return "python3"
-	elseif vim.fn.executable("python") == 1 then
-		return "python"
-	else
-		vim.notify("translator.nvim: python not found", vim.log.levels.ERROR)
+---------------------------------------------------------------------
+-- OpenAI-compatible LLM provider presets
+---------------------------------------------------------------------
+local LLM_PRESETS = {
+	deepseek = { base_url = "https://api.deepseek.com", model = "deepseek-chat" },
+	openai = { base_url = "https://api.openai.com/v1", model = "gpt-4o-mini" },
+	ollama = { base_url = "http://127.0.0.1:11434/v1", model = "llama3.1" },
+	qwen = { base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1", model = "qwen-plus" },
+	kimi = { base_url = "https://api.moonshot.cn/v1", model = "moonshot-v1-8k" },
+	doubao = { base_url = "https://ark.cn-beijing.volces.com/api/v3", model = "doubao-pro-32k" },
+}
+
+---------------------------------------------------------------------
+-- Build the env map passed to the backend for the `llm` engine.
+-- The API key travels via env, never via argv, so it cannot leak into logs.
+---------------------------------------------------------------------
+-- Resolve api_key from the various accepted forms:
+--   api_key = "sk-..."            (string)
+--   api_key = function() ... end   (lazy, e.g. os.getenv)
+--   env = { api_key = ... }        (nested, string or function)
+--   api_key_name = "MY_ENV_VAR"    (read from environment by name)
+local function resolve_api_key(cfg)
+	local key = cfg.api_key
+	if type(key) == "function" then
+		key = key()
+	end
+
+	if (not key or key == "") and type(cfg.env) == "table" then
+		key = cfg.env.api_key
+		if type(key) == "function" then
+			key = key()
+		end
+	end
+
+	if (not key or key == "") and cfg.api_key_name and cfg.api_key_name ~= "" then
+		key = os.getenv(cfg.api_key_name)
+	end
+
+	return key or ""
+end
+
+local function resolve_model(cfg)
+	if cfg.model and cfg.model ~= "" then
+		return cfg.model
+	end
+	if type(cfg.schema) == "table" and cfg.schema.model then
+		local m = cfg.schema.model
+		if type(m) == "table" and m.default then
+			return m.default
+		elseif type(m) == "string" then
+			return m
+		end
+	end
+	return nil
+end
+
+local function resolve_base_url(cfg)
+	if cfg.base_url and cfg.base_url ~= "" then
+		return cfg.base_url
+	end
+	if type(cfg.env) == "table" and cfg.env.base_url then
+		return cfg.env.base_url
+	end
+	return nil
+end
+
+local function build_llm_env()
+	local cfg = vim.g.translator_llm
+	if not cfg or type(cfg) ~= "table" then
 		return nil
 	end
+
+	-- provider 与 name 互为别名
+	local provider = cfg.provider or cfg.name
+	local base_url = resolve_base_url(cfg)
+	local model = resolve_model(cfg)
+
+	if provider and LLM_PRESETS[provider] then
+		local preset = LLM_PRESETS[provider]
+		base_url = base_url or preset.base_url
+		model = model or preset.model
+	end
+
+	if not base_url or not model then
+		return nil
+	end
+
+	local env = {
+		TRANSLATOR_LLM_BASE_URL = base_url,
+		TRANSLATOR_LLM_MODEL = model,
+	}
+
+	local api_key = resolve_api_key(cfg)
+	if api_key ~= "" then
+		env.TRANSLATOR_LLM_API_KEY = api_key
+	end
+	if cfg.prompt and cfg.prompt ~= "" then
+		env.TRANSLATOR_LLM_PROMPT = cfg.prompt
+	end
+	if cfg.timeout then
+		env.TRANSLATOR_LLM_TIMEOUT = tostring(cfg.timeout)
+	end
+
+	return env
 end
 
-local function get_script_path()
-	-- 使用 vim.fn.fnamemodify 没问题，但 debug.getinfo 不是 Neovim 特有的
-	-- 改为使用 Neovim 的 API 获取脚本路径
-	local current = debug.getinfo(1, "S").source:sub(2) -- 这个可以保留，因为是 Lua 标准库
+---------------------------------------------------------------------
+-- Locate the compiled Rust backend binary
+---------------------------------------------------------------------
+local binary = require("translator.binary")
 
-	-- 方法1：使用 vim.fn.fnamemodify（已在使用）
-	local root = vim.fn.fnamemodify(current, ":h:h:h")
-
-	-- 方法2：也可以使用 vim.fs 模块（Neovim 0.8+）
-	-- local root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(current)))
-
-	return root .. "/script/translator.py"
-end
-
-function M.start(displaymode, bang, range, line1, line2, argstr)
+function M.start(displaymode, opts, range, line1, line2, argstr)
 	logger.init()
 
-	local options = cmdline.parse(bang, range, line1, line2, argstr)
+	-- Backwards compatibility with the old signature:
+	--   start(displaymode, bang, range, line1, line2, argstr)
+	-- New signature (used by the built-in commands):
+	--   start(displaymode, opts)  -- opts = { bang, range, line1, line2, args }
+	if type(opts) ~= "table" then
+		opts = {
+			bang = opts,
+			range = range or 0,
+			line1 = line1 or 1,
+			line2 = line2 or 1,
+			args = argstr or "",
+		}
+	end
+
+	local options = cmdline.parse(opts)
 	if not options then
 		return
 	end
@@ -47,44 +143,34 @@ function M.start(displaymode, bang, range, line1, line2, argstr)
 end
 
 function M.translate(options, displaymode)
-	local python = get_python()
-	if not python then
+	local bin = binary.get()
+	if not bin then
 		return
 	end
 
-	local script = get_script_path()
-
-	-- 构建命令表
+	-- Build argv (no shell quoting needed; text is passed as a single element).
 	local cmd = {
-		python,
-		script,
+		bin,
+		"translate",
 		"--target_lang",
 		options.target_lang,
 		"--source_lang",
 		options.source_lang,
-		options.text,
 		"--engines",
+		table.concat(options.engines, ","),
 	}
 
-	for _, e in ipairs(options.engines) do
-		table.insert(cmd, e)
-	end
-
-	-- 使用 vim.g（Neovim 原生）
 	if vim.g.translator_proxy_url and vim.g.translator_proxy_url ~= "" then
 		table.insert(cmd, "--proxy")
 		table.insert(cmd, vim.g.translator_proxy_url)
 	end
 
-	if vim.tbl_contains(options.engines, "trans") then
-		local opts = table.concat(vim.g.translator_translate_shell_options or {}, ",")
-		table.insert(cmd, "--options=" .. opts)
-	end
+	-- Text last, so it can never be mistaken for an option value.
+	table.insert(cmd, options.text)
 
 	logger.log(table.concat(cmd, " "))
 
-	-- 调用 job.lua
-	job.jobstart(cmd, displaymode)
+	job.jobstart(cmd, displaymode, build_llm_env(), options)
 end
 
 return M
