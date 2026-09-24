@@ -57,20 +57,34 @@ function M.parse(opts)
 		end
 	end
 
-	options.source_lang = options.source_lang ~= ""
-			and options.source_lang
-		or vim.g.translator_source_lang
-		or "auto"
-	options.target_lang = options.target_lang ~= ""
-			and options.target_lang
-		or vim.g.translator_target_lang
-		or "zh"
+	-------------------------------------------------------------------
+	-- Language direction: auto-detected unless explicitly overridden
+	-------------------------------------------------------------------
+	local explicit_lang = options.source_lang ~= "" or options.target_lang ~= ""
 
-	-------------------------------------------------------------------
-	-- Bang (!) swaps languages
-	-------------------------------------------------------------------
-	if opts.bang then
-		options.source_lang, options.target_lang = options.target_lang, options.source_lang
+	if not explicit_lang then
+		-- Auto direction: CJK text -> zh→en, otherwise -> auto→zh.
+		if util.has_cjk(options.text) then
+			options.source_lang = "zh"
+			options.target_lang = "en"
+		else
+			options.source_lang = "auto"
+			options.target_lang = "zh"
+		end
+	else
+		options.source_lang = options.source_lang ~= ""
+				and options.source_lang
+			or vim.g.translator_source_lang
+			or "auto"
+		options.target_lang = options.target_lang ~= ""
+				and options.target_lang
+			or vim.g.translator_target_lang
+			or "zh"
+
+		-- Bang (!) swaps languages
+		if opts.bang then
+			options.source_lang, options.target_lang = options.target_lang, options.source_lang
+		end
 	end
 
 	return options

@@ -73,6 +73,10 @@ vim.api.nvim_create_user_command("TranslateX", function(opts)
 	})
 end, { nargs = "*", bang = true })
 
+vim.api.nvim_create_user_command("TranslateI", function(opts)
+	require("translator.input").prompt(opts)
+end, { nargs = "*", bang = true, range = true })
+
 vim.api.nvim_create_user_command("TranslateH", function()
 	require("translator.history").export()
 end, {})

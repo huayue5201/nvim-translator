@@ -1,5 +1,6 @@
 -- File: lua/translator/anki.lua
 -- Add the last translation to Anki via AnkiConnect (https://git.sr.ht/~foosoft/anki-connect).
+-- Before saving, an interactive popup lets you edit the note fields.
 -- Requires: Anki running + the "AnkiConnect" addon installed (code 2055492159).
 
 local util = require("translator.util")
@@ -71,8 +72,11 @@ local function ensure_model(model)
 	})
 end
 
-local function build_note(trans, cfg)
-	local text = trans.text or ""
+---------------------------------------------------------------------
+-- Default field values, derived from the last translation.
+---------------------------------------------------------------------
+local function default_fields(trans)
+	local front = trans.text or ""
 	local paraphrase = ""
 	local explains = {}
 	local phonetic = ""
@@ -100,27 +104,32 @@ local function build_note(trans, cfg)
 	end
 
 	return {
+		Front = front,
+		Back = back,
+		Phonetic = phonetic,
+		Example = "",
+	}
+end
+
+local function build_note(fields, cfg)
+	return {
 		deckName = cfg.deck,
 		modelName = cfg.model,
 		fields = {
-			Front = text,
-			Back = back,
-			Phonetic = phonetic,
-			Example = "",
+			Front = fields.Front or "",
+			Back = fields.Back or "",
+			Phonetic = fields.Phonetic or "",
+			Example = fields.Example or "",
 		},
 		tags = { "translator" },
 		options = { allowDuplicate = false },
 	}
 end
 
---- `:TranslateA` — add the last translation to Anki.
-function M.add()
-	local s = state.get()
-	if not s or not s.trans or not s.trans.text or s.trans.text == "" then
-		util.show_msg("没有可添加的翻译（先翻译一次）", "warning")
-		return
-	end
-
+---------------------------------------------------------------------
+-- Persist the (possibly edited) fields to Anki.
+---------------------------------------------------------------------
+local function submit(fields)
 	local cfg = config()
 
 	local _, err = ensure_deck(cfg.deck)
@@ -135,7 +144,7 @@ function M.add()
 		return
 	end
 
-	local note = build_note(s.trans, cfg)
+	local note = build_note(fields, cfg)
 	local result, err3 = request("addNote", { note = note })
 	if err3 then
 		util.show_msg("添加到 Anki 失败：" .. err3, "error")
@@ -147,6 +156,31 @@ function M.add()
 	else
 		util.show_msg("已添加到 Anki：" .. note.fields.Front)
 	end
+end
+
+--- `:TranslateA` — edit then add the last translation to Anki.
+function M.add()
+	local s = state.get()
+	if not s or not s.trans or not s.trans.text or s.trans.text == "" then
+		util.show_msg("没有可添加的翻译（先翻译一次）", "warning")
+		return
+	end
+
+	local defaults = default_fields(s.trans)
+
+	local fields = {
+		{ key = "Front", label = "原文", value = defaults.Front },
+		{ key = "Back", label = "译文", value = defaults.Back },
+		{ key = "Phonetic", label = "音标", value = defaults.Phonetic },
+		{ key = "Example", label = "例句", value = defaults.Example },
+	}
+
+	require("translator.ui.fields").open({
+		fields = fields,
+		on_submit = function(result)
+			submit(result)
+		end,
+	})
 end
 
 return M

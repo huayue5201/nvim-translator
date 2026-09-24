@@ -45,6 +45,27 @@ function M.text_proc(text)
 end
 
 ---------------------------------------------------------------------
+-- Detect whether text contains CJK characters (Chinese / kana / Hangul).
+-- Lua patterns are byte-based, so we match UTF-8 byte ranges directly.
+---------------------------------------------------------------------
+function M.has_cjk(text)
+	if not text or text == "" then
+		return false
+	end
+
+	-- CJK Unified Ideographs U+4E00–U+9FFF  -> E4 80 80 – E9 BF BF
+	-- Hiragana / Katakana      U+3040–U+30FF -> E3 81 80 – E3 83 BF
+	-- Hangul syllables         U+AC00–U+D7AF -> EA B0 80 – ED 9E AF
+	local cjk = "[\228-\233][\128-\191][\128-\191]"
+	local kana = "[\227][\129-\131][\128-\191]"
+	local hangul = "[\234-\237][\128-\191][\128-\191]"
+
+	return text:find(cjk) ~= nil
+		or text:find(kana) ~= nil
+		or text:find(hangul) ~= nil
+end
+
+---------------------------------------------------------------------
 -- Center padding
 ---------------------------------------------------------------------
 function M.pad(text, width, char)

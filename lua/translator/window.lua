@@ -82,4 +82,21 @@ function M.open(lines)
 	end
 end
 
+---------------------------------------------------------------------
+-- Interactive window: fixed (centered) position, focusable so the user
+-- can select and copy the translation text. Used by :TranslateI only.
+---------------------------------------------------------------------
+function M.open_interactive(lines)
+	local width, height = compute_size(lines)
+
+	local cfg = {
+		width = width,
+		height = height,
+		row = math.max(0, math.floor((vim.o.lines - height) / 2)),
+		col = math.max(0, math.floor((vim.o.columns - width) / 2)),
+	}
+
+	require("translator.window.float").create_interactive(lines, cfg)
+end
+
 return M

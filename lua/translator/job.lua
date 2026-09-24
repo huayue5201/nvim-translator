@@ -42,6 +42,8 @@ local function handle_output(displaymode, data, event)
 			action.echo(translations)
 		elseif displaymode == "window" then
 			action.window(translations)
+		elseif displaymode == "interactive" then
+			action.interactive(translations)
 		else
 			action.replace(translations)
 		end

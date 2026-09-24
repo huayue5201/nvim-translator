@@ -17,7 +17,7 @@ Use your favourite plugin manager, then build the backend:
 ```sh
 # with lazy.nvim
 {
-  "yourname/nvim-translator",
+  "huayue5201/nvim-translator",
   build = "make build",
 }
 ```
@@ -34,16 +34,17 @@ make build
 
 ## Usage
 
-| Command           | Action                                                  |
+| Command | Action |
 | ----------------- | ------------------------------------------------------- |
-| `:Translate`      | Echo translation for the word / selection / text         |
-| `:TranslateW`     | Show translation in a floating window                    |
-| `:TranslateR`     | Replace the visual selection with the translation        |
-| `:TranslateX`     | Translate the `*` (system clipboard) register            |
-| `:TranslateSay`   | Speak the source text (`!` = speak the translation)      |
-| `:TranslateA`     | Add the last translation to Anki (via AnkiConnect)       |
-| `:TranslateH`     | Open the translation history                             |
-| `:TranslateL`     | Open the debug log                                       |
+| `:Translate` | Echo translation for the word / selection / text |
+| `:TranslateW` | Show translation in a floating window |
+| `:TranslateR` | Replace the visual selection with the translation |
+| `:TranslateX` | Translate the `*` (system clipboard) register |
+| `:TranslateI` | Prompt for text, then translate it (interactive) |
+| `:TranslateSay` | Speak the source text (`!` = speak the translation) |
+| `:TranslateA` | Add the last translation to Anki (via AnkiConnect) |
+| `:TranslateH` | Open the translation history |
+| `:TranslateL` | Open the debug log |
 
 Text source priority:
 
@@ -52,6 +53,20 @@ Text source priority:
 3. Line range: `:3,5Translate`
 4. Word under cursor
 
+While the translation floating window is open, a footer shows these
+secondary-action keys (the window does **not** grab focus; the keys are only
+mapped while the window is open and restored afterwards):
+
+| Key | Action |
+| ------ | -------------------------- |
+| `s` | speak the source text |
+| `S` | speak the translation |
+| `a` | add to Anki (edit popup) |
+| `y` | copy the translation |
+| `<Esc>` | close the window |
+
+Moving the cursor also closes the window, as before.
+
 Options (passed as `--key=value`):
 
 ```vim
@@ -59,11 +74,45 @@ Options (passed as `--key=value`):
 :Translate --target_lang=en --source_lang=zh 你好
 ```
 
-A trailing `!` swaps source/target languages:
+A trailing `!` swaps source/target languages. It only applies when the
+languages are set explicitly; with auto direction the plugin already
+picks the right direction for you.
+
+### Auto direction (双语自动互翻)
+
+By default the plugin detects the text and picks the direction
+automatically, so both directions work with no flags:
 
 ```vim
-:Translate! hello     " translate zh -> en
+:Translate hello     " en -> zh
+:Translate 你好      " zh -> en
 ```
+
+- Contains CJK (Chinese / kana / Hangul) → `zh → en`
+- Otherwise → `auto → zh`
+
+Explicit `--source_lang` / `--target_lang` override the auto detection:
+
+```vim
+:Translate --source_lang=zh --target_lang=ja 你好
+```
+
+### Interactive input
+
+`:TranslateI` opens an input prompt prefilled with the current context
+(word under cursor / visual selection / line range), so you can tweak the
+text before translating. It accepts the same `--flags` and `!` as
+`:Translate`:
+
+```vim
+:TranslateI                  " prompt, prefilled with <cword>
+:TranslateI --engines=llm    " prompt, then translate with the llm engine
+:TranslateI!                 " prompt, then translate with swapped languages
+```
+
+The result is shown in a fixed, centered floating window; the cursor moves
+into it so you can select and copy the translation text. `q` / `<Esc>` /
+leaving the window closes it.
 
 ## Engines
 
@@ -121,10 +170,10 @@ vim.g.translator_llm = {
 
 Speak the source text or the translation.
 
-| Command            | Action                               |
+| Command | Action |
 | ------------------ | ------------------------------------ |
-| `:TranslateSay`    | Speak the source text (word/sentence) |
-| `:TranslateSay!`   | Speak the translation (target lang)   |
+| `:TranslateSay` | Speak the source text (word/sentence) |
+| `:TranslateSay!` | Speak the translation (target lang) |
 
 `TranslateSay` speaks the **last translated text** (or, if you haven't
 translated yet, the word under cursor / visual selection). `TranslateSay!`
@@ -177,6 +226,16 @@ Translate a word/sentence first, then run `:TranslateA` (or map it to a key):
 :TranslateA
 ```
 
+`:TranslateA` opens an edit popup prefilled with the translation, so you can
+tweak each field before saving:
+
+| Key | Action |
+| ---------------- | ---------------------- |
+| `<Tab>`/`<S-Tab>` | switch field |
+| `<Up>`/`<Down>` | browse field history |
+| `<CR>` | save to Anki |
+| `q` / `<Esc>` | cancel |
+
 On first use the plugin auto-creates the deck and note type (idempotent), so
 no manual Anki setup is needed. Duplicate notes (same front text) are skipped.
 
@@ -186,12 +245,12 @@ vim.keymap.set("n", "<localLeader>tla", "<Cmd>TranslateA<CR>", { desc = "加入 
 
 ### Card fields
 
-| Field    | Content                                  |
+| Field | Content |
 | -------- | ---------------------------------------- |
-| Front    | source text (word / phrase / sentence)   |
-| Back     | translation + dictionary explanations    |
-| Phonetic | pronunciation                            |
-| Example  | reserved (empty for now)                 |
+| Front | source text (word / phrase / sentence) |
+| Back | translation + dictionary explanations |
+| Phonetic | pronunciation |
+| Example | reserved (empty for now) |
 
 ### Anki config
 
@@ -253,3 +312,4 @@ The backend is a single crate under `rust/`. Each engine lives in
 ```vim
 :checkhealth translator
 ```
+

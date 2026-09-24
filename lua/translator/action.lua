@@ -63,6 +63,15 @@ function M.window(trans)
 end
 
 ---------------------------------------------------------------------
+-- Interactive window display (fixed position, focusable, copy-friendly)
+---------------------------------------------------------------------
+function M.interactive(trans)
+	local content = build_window_content(trans)
+	logger.log(content)
+	window.open_interactive(content)
+end
+
+---------------------------------------------------------------------
 -- Echo display
 ---------------------------------------------------------------------
 function M.echo(trans)
