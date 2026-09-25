@@ -327,8 +327,14 @@ function M.open(opts)
 	end
 
 	-------------------------------------------------------------------
-	-- Focus the first field
+	-- Size each window to its pre-filled content, then focus the first
+	-- field. (nvim_buf_set_lines does NOT fire TextChanged/TextChangedI,
+	-- so this must be done explicitly.)
 	-------------------------------------------------------------------
+	for _, w in ipairs(windows) do
+		resize_window(w)
+	end
+
 	focus(1)
 	relayout()
 end
