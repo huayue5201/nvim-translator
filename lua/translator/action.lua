@@ -105,6 +105,8 @@ local function build_window_content(trans, options)
 				end
 			end
 
+			-- 收集去重后的释义
+			local explains_out = {}
 			if t.explains then
 				for _, e in ipairs(t.explains) do
 					if type(e) == "string" then
@@ -113,11 +115,20 @@ local function build_window_content(trans, options)
 						for line in e:gmatch("[^\r\n]+") do
 							local trimmed = util.safe_trim(line)
 							if trimmed ~= "" and not seen[normalize_for_dedup(trimmed)] then
-								table.insert(out, MARK .. trimmed)
+								table.insert(explains_out, trimmed)
 							end
 						end
 					end
 				end
+			end
+
+			-- 译文与补充释义之间空一行（仅当两者都存在时，避免拥挤）
+			if t.paraphrase and t.paraphrase ~= "" and #explains_out > 0 then
+				table.insert(out, "")
+			end
+
+			for _, trimmed in ipairs(explains_out) do
+				table.insert(out, MARK .. trimmed)
 			end
 		end
 	end
