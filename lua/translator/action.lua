@@ -9,11 +9,70 @@ local M = {}
 
 local MARK = "• "
 
+-- Prefix used for the target-language sentence in bilingual mode.
+local TARGET_MARK = "↳ "
+
+---------------------------------------------------------------------
+-- Bilingual interleave: alternate source sentence / target sentence.
+-- When the two sides have different sentence counts, the longer side's
+-- extra sentences are appended at the end.
+---------------------------------------------------------------------
+local function append_bilingual(out, source_text, target_text)
+	local src = util.split_sentences(source_text)
+	local dst = util.split_sentences(target_text)
+
+	local n = math.max(#src, #dst)
+	for i = 1, n do
+		if src[i] then
+			table.insert(out, src[i])
+		end
+		if dst[i] then
+			table.insert(out, TARGET_MARK .. dst[i])
+		end
+	end
+end
+
+---------------------------------------------------------------------
+-- Deduplicate LLM results: models often copy the paraphrase into
+-- `explains`, which would show the same translation twice. Collect the
+-- paraphrase text (whole + per-sentence) and skip any explain that
+-- matches it, ignoring trailing sentence punctuation.
+---------------------------------------------------------------------
+local function normalize_for_dedup(s)
+	s = util.safe_trim(s)
+	s = s:gsub("[\r\n]+", " ")
+	s = s:gsub("[。！？.!?]+%s*$", "")
+	return s
+end
+
+local function collect_seen(paraphrase)
+	local seen = {}
+	if not paraphrase or paraphrase == "" then
+		return seen
+	end
+
+	local function add(s)
+		local k = normalize_for_dedup(s)
+		if k ~= "" then
+			seen[k] = true
+		end
+	end
+
+	add(paraphrase)
+	for _, s in ipairs(util.split_sentences(paraphrase)) do
+		add(s)
+	end
+
+	return seen
+end
+
 ---------------------------------------------------------------------
 -- Build window content
 ---------------------------------------------------------------------
-local function build_window_content(trans)
+local function build_window_content(trans, options)
 	local out = {}
+
+	local bilingual = options and options.bilingual == true
 
 	-- 原文（自动截断）
 	local text = trans.text
@@ -33,9 +92,16 @@ local function build_window_content(trans)
 				table.insert(out, MARK .. "[" .. t.phonetic .. "]")
 			end
 
+			-- 已展示的译文文本，用于对 explains 去重
+			local seen = collect_seen(t.paraphrase)
+
 			if t.paraphrase and t.paraphrase ~= "" then
-				for line in t.paraphrase:gmatch("[^\r\n]+") do
-					table.insert(out, MARK .. util.safe_trim(line))
+				if bilingual then
+					append_bilingual(out, trans.text, t.paraphrase)
+				else
+					for line in t.paraphrase:gmatch("[^\r\n]+") do
+						table.insert(out, MARK .. util.safe_trim(line))
+					end
 				end
 			end
 
@@ -46,7 +112,7 @@ local function build_window_content(trans)
 						-- 避免 nvim_buf_set_lines 报 "item contains newlines"。
 						for line in e:gmatch("[^\r\n]+") do
 							local trimmed = util.safe_trim(line)
-							if trimmed ~= "" then
+							if trimmed ~= "" and not seen[normalize_for_dedup(trimmed)] then
 								table.insert(out, MARK .. trimmed)
 							end
 						end
@@ -62,8 +128,8 @@ end
 ---------------------------------------------------------------------
 -- Window display
 ---------------------------------------------------------------------
-function M.window(trans)
-	local content = build_window_content(trans)
+function M.window(trans, options)
+	local content = build_window_content(trans, options)
 	logger.log(content)
 	window.open(content)
 end
@@ -71,8 +137,8 @@ end
 ---------------------------------------------------------------------
 -- Interactive window display (fixed position, focusable, copy-friendly)
 ---------------------------------------------------------------------
-function M.interactive(trans)
-	local content = build_window_content(trans)
+function M.interactive(trans, options)
+	local content = build_window_content(trans, options)
 	logger.log(content)
 	window.open_interactive(content)
 end
@@ -113,13 +179,19 @@ function M.echo(trans)
 				table.insert(chunks, { (t.paraphrase:gsub("[\r\n]+", " ")) .. " ", "Normal" })
 			end
 			if t.explains and #t.explains > 0 then
+				local seen = collect_seen(t.paraphrase)
 				local explains = {}
 				for _, e in ipairs(t.explains) do
 					if type(e) == "string" then
-						explains[#explains + 1] = e:gsub("[\r\n]+", " ")
+						local dedup = e:gsub("[\r\n]+", " ")
+						if not seen[normalize_for_dedup(dedup)] then
+							explains[#explains + 1] = dedup
+						end
 					end
 				end
-				table.insert(chunks, { table.concat(explains, " "), "Normal" })
+				if #explains > 0 then
+					table.insert(chunks, { table.concat(explains, " "), "Normal" })
+				end
 			end
 		end
 	end

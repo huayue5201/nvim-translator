@@ -6,13 +6,6 @@ local M = {}
 ---------------------------------------------------------------------
 -- Message helpers
 ---------------------------------------------------------------------
-function M.echo(group, msg)
-	if not msg or msg == "" then
-		return
-	end
-	vim.api.nvim_echo({ { msg, group } }, false, {})
-end
-
 function M.show_msg(message, msg_type)
 	local msg = type(message) == "string" and message or vim.inspect(message)
 	local prefix = "[translator] "
@@ -45,24 +38,117 @@ function M.text_proc(text)
 end
 
 ---------------------------------------------------------------------
--- Detect whether text contains CJK characters (Chinese / kana / Hangul).
--- Lua patterns are byte-based, so we match UTF-8 byte ranges directly.
+-- CJK detection. Lua patterns are byte-based, so we match UTF-8 byte
+-- ranges directly:
+--   Han (CJK Unified Ideographs) U+4E00–9FFF -> E4 80 80 – E9 BF BF
+--   Hiragana / Katakana          U+3040–30FF -> E3 81 80 – E3 83 BF
+--   Hangul syllables             U+AC00–D7AF -> EA B0 80 – ED 9E AF
 ---------------------------------------------------------------------
+local function has_han(text)
+	return text ~= nil and text ~= "" and text:find("[\228-\233][\128-\191][\128-\191]") ~= nil
+end
+
+local function has_kana(text)
+	return text ~= nil and text ~= "" and text:find("[\227][\129-\131][\128-\191]") ~= nil
+end
+
+local function has_hangul(text)
+	return text ~= nil and text ~= "" and text:find("[\234-\237][\128-\191][\128-\191]") ~= nil
+end
+
+--- True if the text contains any CJK character (Han / kana / Hangul).
 function M.has_cjk(text)
+	return has_han(text) or has_kana(text) or has_hangul(text)
+end
+
+--- Classify CJK text as "ko" (Hangul), "ja" (kana) or "zh" (Han), or nil
+--- when the text is not CJK. Kana and Hangul are decisive; Han alone is
+--- treated as Chinese (Japanese text virtually always contains kana, and
+--- modern Korean text is Hangul).
+function M.detect_cjk(text)
+	if has_hangul(text) then
+		return "ko"
+	end
+	if has_kana(text) then
+		return "ja"
+	end
+	if has_han(text) then
+		return "zh"
+	end
+	return nil
+end
+
+---------------------------------------------------------------------
+-- Split text into sentences, keeping the terminating punctuation.
+-- Handles both Latin (. ! ?) and fullwidth CJK (。！？) terminators.
+-- ASCII terminators only split when followed by whitespace/end, to avoid
+-- breaking decimals ("3.14") and abbreviations ("Mr. Smith").
+---------------------------------------------------------------------
+function M.split_sentences(text)
 	if not text or text == "" then
-		return false
+		return {}
 	end
 
-	-- CJK Unified Ideographs U+4E00–U+9FFF  -> E4 80 80 – E9 BF BF
-	-- Hiragana / Katakana      U+3040–U+30FF -> E3 81 80 – E3 83 BF
-	-- Hangul syllables         U+AC00–U+D7AF -> EA B0 80 – ED 9E AF
-	local cjk = "[\228-\233][\128-\191][\128-\191]"
-	local kana = "[\227][\129-\131][\128-\191]"
-	local hangul = "[\234-\237][\128-\191][\128-\191]"
+	text = text:gsub("[\r\n\t]+", " ")
+	text = text:gsub("%s+", " ")
 
-	return text:find(cjk) ~= nil
-		or text:find(kana) ~= nil
-		or text:find(hangul) ~= nil
+	local sentences = {}
+	local buf = ""
+
+	local function flush()
+		buf = M.safe_trim(buf)
+		if buf ~= "" then
+			table.insert(sentences, buf)
+		end
+		buf = ""
+	end
+
+	local function peek(i)
+		if i > #text then
+			return ""
+		end
+		local b = text:byte(i)
+		if b >= 0xE0 and b <= 0xEF then
+			return text:sub(i, i + 2)
+		elseif b >= 0xC0 and b <= 0xDF then
+			return text:sub(i, i + 1)
+		end
+		return text:sub(i, i)
+	end
+
+	local i = 1
+	while i <= #text do
+		local b = text:byte(i)
+		local ch
+		if b >= 0xE0 and b <= 0xEF then
+			ch = text:sub(i, i + 2)
+			i = i + 3
+		elseif b >= 0xC0 and b <= 0xDF then
+			ch = text:sub(i, i + 1)
+			i = i + 2
+		else
+			ch = text:sub(i, i)
+			i = i + 1
+		end
+
+		buf = buf .. ch
+
+		local is_cjk_term = (ch == "。" or ch == "！" or ch == "？")
+		local is_ascii_term = (ch == "." or ch == "!" or ch == "?")
+
+		if is_cjk_term then
+			flush()
+		elseif is_ascii_term then
+			local next_ch = peek(i)
+			if next_ch == "" or next_ch == " " then
+				flush()
+			end
+		end
+	end
+
+	flush()
+
+	return sentences
 end
 
 ---------------------------------------------------------------------
@@ -277,10 +363,5 @@ function M.get_text_from_context(opts)
 		return table.concat(lines, "\n")
 	end
 end
-
----------------------------------------------------------------------
--- Backward compatibility
----------------------------------------------------------------------
-M.visual_select = M.get_visual_selection
 
 return M

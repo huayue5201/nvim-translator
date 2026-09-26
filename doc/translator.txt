@@ -107,8 +107,15 @@ A trailing "!" swaps source/target languages.
 AUTO DIRECTION ~
 
 By default the plugin detects the text and picks the direction
-automatically: CJK text translates to English, everything else translates to
-Chinese. Explicit `--source_lang` / `--target_lang` override this.
+automatically: >
+    Korean (Hangul)     -> ko -> en
+    Japanese (kana)     -> ja -> en
+    Chinese (Han)       -> zh -> en
+    everything else     -> auto -> zh
+<
+Explicit `--source_lang` / `--target_lang` override this. Window modes also
+accept `--bilingual` / `--no-bilingual` to toggle the sentence-by-sentence
+source/translation view (default: `vim.g.translator_bilingual`).
 
 ==============================================================================
 5. ENGINES                                                *translator-engines*
@@ -182,10 +189,15 @@ Suggested keymaps: >
     vim.g.translator_window_type = "float"   -- "float" | "preview"
     vim.g.translator_window_max_width = 0.4  -- fraction of columns
     vim.g.translator_window_max_height = 0.3 -- fraction of lines
+    vim.g.translator_bilingual = false       -- sentence-by-sentence view
+    vim.g.translator_spinner = true          -- cursor spinner while translating
     vim.g.translator_default_engines = { "google", "youdao" }
     vim.g.translator_debug = false           -- write logs to data dir
     vim.g.translator_tts_engine = "say"      -- "say" | "google"
     vim.g.translator_anki_deck = "翻译"      -- Anki deck name
+    vim.g.translator_anki_port = 8765        -- AnkiConnect port
+    vim.g.translator_anki_model = "translator" -- Anki note model
+    vim.g.translator_llm = { ... }           -- OpenAI-compatible LLM config
 <
 
 ==============================================================================
@@ -210,8 +222,7 @@ The backend is a single crate under `rust/`. Each engine lives in
           "text": "hello",
           "phonetic": "",
           "paraphrase": "你好",
-          "explains": ["[感叹词] 你好;喂"],
-          "alternative": []
+          "explains": ["[感叹词] 你好;喂"]
         }
       ]
     }

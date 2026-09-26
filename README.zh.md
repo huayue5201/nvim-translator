@@ -95,6 +95,38 @@ make build
 :Translate --source_lang=zh --target_lang=ja 你好
 ```
 
+### 双语对照
+
+窗口模式(`:TranslateW` / `:TranslateI`)可以把原文和译文**逐句交错**显示,
+而不是把整段译文堆在原文下方:
+
+```vim
+:TranslateW --bilingual hello. how are you?
+```
+
+每个引擎的 `paraphrase` 会与原文逐句交错:一句原文后面紧跟一句译文
+(译文以 `↳` 标记):
+
+```
+⟦ hello. how are you? ⟧
+
+─── google ───
+  hello.
+  ↳ 你好。
+  how are you?
+  ↳ 你好吗？
+```
+
+词典式释义(`explains`)和音标保持不变。
+
+全局开启:
+
+```lua
+vim.g.translator_bilingual = true
+```
+
+也可用 `--bilingual` / `--no-bilingual` 在单次调用中覆盖。
+
 ### 交互式输入
 
 `:TranslateI` 会打开一个预填当前上下文(光标下单词 / 可视选区 / 行范围)的
@@ -299,6 +331,8 @@ vim.g.translator_history_enable = true   -- 持久化历史
 vim.g.translator_window_type = "float"   -- "float" | "preview"
 vim.g.translator_window_max_width = 0.4  -- 列数占比
 vim.g.translator_window_max_height = 0.3 -- 行数占比
+vim.g.translator_bilingual = false       -- 逐句对照显示
+vim.g.translator_spinner = true          -- 翻译时在光标处显示旋转提示
 vim.g.translator_default_engines = { "google", "youdao" }
 vim.g.translator_debug = false           -- 写入日志到数据目录
 
@@ -333,8 +367,7 @@ make clean
       "text": "hello",
       "phonetic": "",
       "paraphrase": "你好",
-      "explains": ["[感叹词] 你好;喂"],
-      "alternative": []
+      "explains": ["[感叹词] 你好;喂"]
     }
   ]
 }

@@ -100,6 +100,39 @@ Explicit `--source_lang` / `--target_lang` override the auto detection:
 :Translate --source_lang=zh --target_lang=ja 你好
 ```
 
+### Bilingual side-by-side (双语对照)
+
+The window modes (`:TranslateW`, `:TranslateI`) can show the source and the
+translation **sentence by sentence** instead of stacking the full translation
+below the source:
+
+```vim
+:TranslateW --bilingual hello. how are you?
+```
+
+Each engine's `paraphrase` is interleaved with the source: one source
+sentence followed by its translation (marked with `↳`):
+
+```
+⟦ hello. how are you? ⟧
+
+─── google ───
+  hello.
+  ↳ 你好。
+  how are you?
+  ↳ 你好吗？
+```
+
+Dictionary-style explanations (`explains`) and phonetics are unchanged.
+
+Enable it globally:
+
+```lua
+vim.g.translator_bilingual = true
+```
+
+and override per invocation with `--bilingual` / `--no-bilingual`.
+
 ### Interactive input
 
 `:TranslateI` opens an input prompt prefilled with the current context
@@ -317,6 +350,8 @@ vim.g.translator_history_enable = true   -- persist history
 vim.g.translator_window_type = "float"   -- "float" | "preview"
 vim.g.translator_window_max_width = 0.4  -- fraction of columns
 vim.g.translator_window_max_height = 0.3 -- fraction of lines
+vim.g.translator_bilingual = false       -- sentence-by-sentence view
+vim.g.translator_spinner = true          -- cursor spinner while translating
 vim.g.translator_default_engines = { "google", "youdao" }
 vim.g.translator_debug = false           -- write logs to data dir
 
@@ -351,8 +386,7 @@ The backend is a single crate under `rust/`. Each engine lives in
       "text": "hello",
       "phonetic": "",
       "paraphrase": "你好",
-      "explains": ["[感叹词] 你好;喂"],
-      "alternative": []
+      "explains": ["[感叹词] 你好;喂"]
     }
   ]
 }

@@ -12,9 +12,12 @@ local stdout_save = nil
 local current_options = nil
 
 ---------------------------------------------------------------------
--- FIXED: JSON 拼接
+-- Handle buffered job output (stdout carries the JSON result).
 ---------------------------------------------------------------------
 local function handle_output(displaymode, data, event)
+	-- 任何输出到达都说明请求已有响应，停止旋转提示。
+	require("translator.spinner").close()
+
 	if not data then
 		return
 	end
@@ -41,9 +44,9 @@ local function handle_output(displaymode, data, event)
 		if displaymode == "echo" then
 			action.echo(translations)
 		elseif displaymode == "window" then
-			action.window(translations)
+			action.window(translations, current_options)
 		elseif displaymode == "interactive" then
-			action.interactive(translations)
+			action.interactive(translations, current_options)
 		else
 			action.replace(translations)
 		end
@@ -63,6 +66,11 @@ function M.jobstart(cmd, displaymode, env, options)
 	current_options = options
 	vim.g.translator_status = "translating"
 
+	-- 请求延时期间在光标处显示旋转提示（可用 vim.g.translator_spinner 关闭）。
+	if vim.g.translator_spinner ~= false then
+		require("translator.spinner").start()
+	end
+
 	local opts = {
 		stdout_buffered = true,
 		stderr_buffered = true,
@@ -75,6 +83,10 @@ function M.jobstart(cmd, displaymode, env, options)
 		on_stderr = function(_, data)
 			vim.g.translator_status = ""
 			handle_output(displaymode, data, "stderr")
+		end,
+
+		on_exit = function()
+			require("translator.spinner").close()
 		end,
 	}
 

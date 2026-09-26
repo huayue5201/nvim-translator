@@ -10,6 +10,7 @@ function M.parse(opts)
 		engines = {},
 		source_lang = "",
 		target_lang = "",
+		bilingual = nil,
 	}
 
 	-------------------------------------------------------------------
@@ -19,7 +20,14 @@ function M.parse(opts)
 	local texts = {}
 
 	for _, arg in ipairs(args) do
-		if arg:match("^%-%-") then
+		if arg:match("^%-%-[^=]+$") then
+			-- Boolean flags (no value)
+			if arg == "--bilingual" then
+				options.bilingual = true
+			elseif arg == "--no-bilingual" then
+				options.bilingual = false
+			end
+		elseif arg:match("^%-%-[^=]+=.+$") then
 			local key, val = arg:match("^%-%-(.-)=(.+)$")
 			if key and val then
 				if key == "engines" then
@@ -58,14 +66,24 @@ function M.parse(opts)
 	end
 
 	-------------------------------------------------------------------
+	-- Bilingual display: --bilingual / --no-bilingual override the
+	-- global default (vim.g.translator_bilingual).
+	-------------------------------------------------------------------
+	if options.bilingual == nil then
+		options.bilingual = not not vim.g.translator_bilingual
+	end
+
+	-------------------------------------------------------------------
 	-- Language direction: auto-detected unless explicitly overridden
 	-------------------------------------------------------------------
 	local explicit_lang = options.source_lang ~= "" or options.target_lang ~= ""
 
 	if not explicit_lang then
-		-- Auto direction: CJK text -> zh→en, otherwise -> auto→zh.
-		if util.has_cjk(options.text) then
-			options.source_lang = "zh"
+		-- Auto direction: CJK text -> its language → en, otherwise -> auto→zh.
+		-- Korean (Hangul) -> ko→en, Japanese (kana) -> ja→en, Chinese (Han) -> zh→en.
+		local cjk = util.detect_cjk(options.text)
+		if cjk then
+			options.source_lang = cjk
 			options.target_lang = "en"
 		else
 			options.source_lang = "auto"
@@ -98,6 +116,8 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
 		"--engines=",
 		"--source_lang=",
 		"--target_lang=",
+		"--bilingual",
+		"--no-bilingual",
 	}
 
 	local engines = {
