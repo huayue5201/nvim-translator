@@ -115,6 +115,10 @@ local function install_maps()
 		{ "n", "a", add_anki },
 		{ "n", "y", copy_paraphrase },
 		{ "n", "<Esc>", close },
+		-- 可视模式翻译后浮窗弹出，光标仍处可视模式；让 <Esc> 优先关闭浮窗
+		-- 而不是先退出选择，避免用户需要按两下 Esc。
+		-- 注：'v' 模式映射覆盖 v / V / Ctrl-V 全部可视模式，无需单独注册 'x'。
+		{ "v", "<Esc>", close },
 	}
 	for _, m in ipairs(maps) do
 		saved_maps[m[1] .. ":" .. m[2]] = find_global_map(m[1], m[2])
