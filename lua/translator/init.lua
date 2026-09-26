@@ -173,4 +173,30 @@ function M.translate(options, displaymode)
 	job.jobstart(cmd, displaymode, build_llm_env(), options)
 end
 
+---------------------------------------------------------------------
+-- API-documentation translation (:TranslateApi)
+---------------------------------------------------------------------
+function M.translate_api(opts)
+	opts = opts or {}
+
+	-- Reuse the buffer's filetype as the programming-language hint. The `api`
+	-- engine reads it from `source_lang`; non-code buffers fall back to "code".
+	local ft = vim.bo.filetype
+	local lang = (ft ~= "" and ft ~= "text" and ft ~= "markdown") and ft or "code"
+
+	local extra = vim.trim(opts.args or "")
+	local args = "--engines=api --source_lang=" .. lang
+	if extra ~= "" then
+		args = args .. " " .. extra
+	end
+
+	M.start("window", {
+		bang = false,
+		range = opts.range or 0,
+		line1 = opts.line1 or 1,
+		line2 = opts.line2 or 1,
+		args = args,
+	})
+end
+
 return M

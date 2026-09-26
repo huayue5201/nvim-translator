@@ -92,3 +92,12 @@ end, { bang = true, range = true })
 vim.api.nvim_create_user_command("TranslateA", function()
 	require("translator.anki").add()
 end, {})
+
+vim.api.nvim_create_user_command("TranslateApi", function(opts)
+	require("translator").translate_api({
+		range = opts.range,
+		line1 = opts.line1,
+		line2 = opts.line2,
+		args = opts.args,
+	})
+end, { nargs = "*", range = true })

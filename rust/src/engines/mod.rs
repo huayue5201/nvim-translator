@@ -1,5 +1,6 @@
 use crate::Translation;
 
+pub mod api;
 pub mod baicizhan;
 pub mod baidu;
 pub mod bing;
@@ -32,6 +33,7 @@ pub fn translate(
     text: &str,
 ) -> Translation {
     match engine {
+        "api" => api::translate(client, sl, tl, text),
         "google" => google::translate(client, sl, tl, text),
         "youdao" => youdao::translate(client, sl, tl, text),
         "baidu" => baidu::translate(client, text),

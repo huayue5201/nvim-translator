@@ -1,0 +1,222 @@
+*translator.txt*   Neovim-native translation plugin (Rust backend)
+
+==============================================================================
+CONTENTS                                                     *translator*
+
+1. Introduction ..................................... |translator-intro|
+2. Requirements ..................................... |translator-requirements|
+3. Install .......................................... |translator-install|
+4. Commands ......................................... |translator-commands|
+5. Engines .......................................... |translator-engines|
+6. API documentation translation ..................... |translator-api|
+7. Configuration .................................... |translator-config|
+8. Development ...................................... |translator-development|
+
+==============================================================================
+1. INTRODUCTION                                            *translator-intro*
+
+translator.nvim is a Neovim-native translation plugin. The backend is written
+in Rust (no Python required); Neovim talks to it through |jobstart()| using an
+`argv → stdout JSON` protocol.
+
+It provides dictionary translation, bilingual auto-direction, an
+OpenAI-compatible LLM engine, text-to-speech, Anki integration, and an
+API-documentation engine for translating code symbols.
+
+==============================================================================
+2. REQUIREMENTS                                      *translator-requirements*
+
+- Neovim 0.8+ (0.10+ recommended; TTS and Anki features need 0.10+)
+- Rust toolchain (`cargo`) — only needed once, to build the backend binary
+- `curl` — for the Anki feature
+
+==============================================================================
+3. INSTALL                                                *translator-install*
+
+Use your favourite plugin manager, then build the backend: >
+
+    -- lazy.nvim
+    {
+      "huayue5201/nvim-translator",
+      build = "make build",
+    }
+<
+Or manually: >
+    cd path/to/nvim-translator
+    make build
+<
+`make build` runs `cargo build --release` and copies the binary to
+`bin/translator`.
+
+==============================================================================
+4. COMMANDS                                              *translator-commands*
+
+                                                    *:Translate*
+:Translate [--key=value ...] [text]
+        Echo translation for the word / selection / text.
+
+                                                    *:TranslateW*
+:TranslateW
+        Show the translation in a floating window.
+
+                                                    *:TranslateR*
+:TranslateR
+        Replace the visual selection with the translation.
+
+                                                    *:TranslateX*
+:TranslateX
+        Translate the "* (system clipboard) register.
+
+                                                    *:TranslateI*
+:TranslateI
+        Prompt for text, then translate it (interactive).
+
+                                                    *:TranslateSay*
+:TranslateSay[!]
+        Speak the source text ("!" speaks the translation).
+
+                                                    *:TranslateA*
+:TranslateA
+        Add the last translation to Anki (via AnkiConnect).
+
+                                                    *:TranslateApi*
+:TranslateApi [--target_lang=...] [symbol]
+        Translate a code API symbol with its documentation. See
+        |translator-api|.
+
+                                                    *:TranslateH*
+:TranslateH
+        Open the translation history.
+
+                                                    *:TranslateL*
+:TranslateL
+        Open the debug log.
+
+Text source priority: >
+    1. Explicit text after the command:  :Translate hello world
+    2. Visual selection (char / line / block wise)
+    3. Line range:                       :3,5Translate
+    4. Word under cursor
+<
+Options are passed as `--key=value`: >
+    :Translate --engines=google,youdao hello world
+    :Translate --target_lang=en --source_lang=zh 你好
+<
+A trailing "!" swaps source/target languages.
+
+AUTO DIRECTION ~
+
+By default the plugin detects the text and picks the direction
+automatically: CJK text translates to English, everything else translates to
+Chinese. Explicit `--source_lang` / `--target_lang` override this.
+
+==============================================================================
+5. ENGINES                                                *translator-engines*
+
+`google`, `youdao`, `baidu`, `bing`, `baicizhan`, `haici`, `iciba`,
+`trans` (translate-shell CLI), `sdcv` (StarDict CLI), `llm`
+(OpenAI-compatible LLM API), and `api` (API-documentation engine, see
+|translator-api|).
+
+`trans` and `sdcv` shell out to external commands and must be installed
+separately.
+
+LLM ENGINE ~
+
+One generic engine covers every OpenAI-compatible provider (DeepSeek, OpenAI,
+Qwen, Kimi, Doubao, local Ollama, ...). The API key travels via an environment
+variable, never via argv. Example: >
+    vim.g.translator_llm = {
+        provider = "deepseek",
+        api_key  = function() return os.getenv("DEEPSEEK_API_KEY") end,
+        model    = "deepseek-chat",
+    }
+    vim.g.translator_default_engines = { "llm" }
+<
+
+==============================================================================
+6. API DOCUMENTATION TRANSLATION                            *translator-api*
+
+                                                          *:TranslateApi*
+`:TranslateApi` translates a code API symbol together with its documentation,
+instead of doing a plain dictionary lookup. It is useful when 80% of your
+translating happens over code.
+
+How it works: the current buffer's |'filetype'| is used as the
+programming-language hint, and the symbol is sent to the configured LLM with
+an API-documentation prompt. The model decides whether the input is an API; if
+it is not (a plain word, for example), it falls back to a normal translation.
+
+Output sections (only the applicable ones are shown):
+
+    - 一句话概述   paraphrase (translated)
+    - 签名         exact signature / call form, kept verbatim
+    - 参数         parameter descriptions (translated)
+    - 返回值       return value description (translated)
+    - 示例         short usage example, code kept verbatim
+    - 备注         deprecation / version / caveats (translated)
+
+Code, signatures, identifiers and parameter names are always kept verbatim;
+only human-language descriptions are translated into the target language.
+
+The `api` engine shares the LLM configuration with the `llm` engine, so it
+requires `vim.g.translator_llm` (see |translator-engines|). Examples: >
+    :TranslateApi                          " word under cursor
+    :TranslateApi requests.get             " explicit symbol
+    :TranslateApi --target_lang=en map     " explicit target language
+<
+Suggested keymaps: >
+    vim.keymap.set("n", "<localLeader>tld", "<Cmd>TranslateApi<CR>", { desc = "API 文档翻译" })
+    vim.keymap.set("v", "<localLeader>tld", ":TranslateApi<CR>", { desc = "API 文档翻译" })
+<
+
+==============================================================================
+7. CONFIGURATION                                          *translator-config*
+
+                                                            *translator_*
+>
+    vim.g.translator_target_lang = "zh"      -- default target language
+    vim.g.translator_source_lang = "auto"    -- default source language
+    vim.g.translator_proxy_url = ""          -- e.g. "socks5://127.0.0.1:1080"
+    vim.g.translator_history_enable = true   -- persist history
+    vim.g.translator_window_type = "float"   -- "float" | "preview"
+    vim.g.translator_window_max_width = 0.4  -- fraction of columns
+    vim.g.translator_window_max_height = 0.3 -- fraction of lines
+    vim.g.translator_default_engines = { "google", "youdao" }
+    vim.g.translator_debug = false           -- write logs to data dir
+    vim.g.translator_tts_engine = "say"      -- "say" | "google"
+    vim.g.translator_anki_deck = "翻译"      -- Anki deck name
+<
+
+==============================================================================
+8. DEVELOPMENT                                        *translator-development*
+
+                                                        *translator-make*
+>
+    make build   # cargo build --release && install to bin/
+    make test    # cargo test (offline unit tests for response parsers)
+    make clean
+<
+The backend is a single crate under `rust/`. Each engine lives in
+`rust/src/engines/` and returns a JSON object on stdout: >
+    {
+      "text": "hello",
+      "status": 1,
+      "results": [
+        {
+          "engine": "google",
+          "sl": "en",
+          "tl": "zh",
+          "text": "hello",
+          "phonetic": "",
+          "paraphrase": "你好",
+          "explains": ["[感叹词] 你好;喂"],
+          "alternative": []
+        }
+      ]
+    }
+<
+Health check: >
+    :checkhealth translator
+<
+vim:tw=78:ts=8:noet:ft=help:norl:

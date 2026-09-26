@@ -26,7 +26,7 @@ enum Command {
 #[derive(Args)]
 #[command(rename_all = "snake_case")]
 struct TranslateArgs {
-    /// Comma-separated engine names: google,youdao,baidu,bing,baicizhan,haici,iciba,llm,trans,sdcv
+    /// Comma-separated engine names: google,youdao,baidu,bing,baicizhan,haici,iciba,llm,api,trans,sdcv
     #[arg(long, value_delimiter = ',', default_value = "google")]
     engines: Vec<String>,
 

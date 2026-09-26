@@ -34,16 +34,22 @@ local function build_window_content(trans)
 			end
 
 			if t.paraphrase and t.paraphrase ~= "" then
-				for line in t.paraphrase:gmatch("[^\n]+") do
+				for line in t.paraphrase:gmatch("[^\r\n]+") do
 					table.insert(out, MARK .. util.safe_trim(line))
 				end
 			end
 
 			if t.explains then
 				for _, e in ipairs(t.explains) do
-					local trimmed = util.safe_trim(e)
-					if trimmed ~= "" then
-						table.insert(out, MARK .. trimmed)
+					if type(e) == "string" then
+						-- 每条释义可能来自 LLM 且含换行,逐行拆分后作为独立行写入,
+						-- 避免 nvim_buf_set_lines 报 "item contains newlines"。
+						for line in e:gmatch("[^\r\n]+") do
+							local trimmed = util.safe_trim(line)
+							if trimmed ~= "" then
+								table.insert(out, MARK .. trimmed)
+							end
+						end
 					end
 				end
 			end
@@ -104,10 +110,16 @@ function M.echo(trans)
 				table.insert(chunks, { "[" .. t.phonetic .. "] ", "Type" })
 			end
 			if t.paraphrase and t.paraphrase ~= "" then
-				table.insert(chunks, { t.paraphrase .. " ", "Normal" })
+				table.insert(chunks, { (t.paraphrase:gsub("[\r\n]+", " ")) .. " ", "Normal" })
 			end
 			if t.explains and #t.explains > 0 then
-				table.insert(chunks, { table.concat(t.explains, " "), "Normal" })
+				local explains = {}
+				for _, e in ipairs(t.explains) do
+					if type(e) == "string" then
+						explains[#explains + 1] = e:gsub("[\r\n]+", " ")
+					end
+				end
+				table.insert(chunks, { table.concat(explains, " "), "Normal" })
 			end
 		end
 	end
@@ -161,6 +173,8 @@ function M.replace(trans)
 		scol, ecol = ecol, scol
 	end
 
+	-- 统一换行符，避免 LLM 返回 \r\n 时把 \r 写进 buffer
+	replacement = replacement:gsub("\r\n", "\n"):gsub("\r", "\n")
 	local lines = vim.split(replacement, "\n")
 
 	vim.api.nvim_buf_set_text(0, srow, scol, erow, ecol + 1, lines)

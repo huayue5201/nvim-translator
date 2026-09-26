@@ -101,6 +101,7 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
 	}
 
 	local engines = {
+		"api",
 		"baicizhan",
 		"baidu",
 		"bing",

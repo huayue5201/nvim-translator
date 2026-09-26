@@ -1,8 +1,10 @@
 # translator.nvim
 
 A Neovim-native translation plugin. The backend is written in **Rust** (no
-Python required); Neovim talks to it via `jobstart` using the same
-`argv → stdout JSON` protocol as before.
+Python required); Neovim talks to it via `jobstart` using an
+`argv → stdout JSON` protocol.
+
+[中文文档](README.zh.md)
 
 ## Requirements
 
@@ -41,6 +43,7 @@ make build
 | `:TranslateR` | Replace the visual selection with the translation |
 | `:TranslateX` | Translate the `*` (system clipboard) register |
 | `:TranslateI` | Prompt for text, then translate it (interactive) |
+| `:TranslateApi` | Translate a code API symbol with its documentation |
 | `:TranslateSay` | Speak the source text (`!` = speak the translation) |
 | `:TranslateA` | Add the last translation to Anki (via AnkiConnect) |
 | `:TranslateH` | Open the translation history |
@@ -117,8 +120,8 @@ leaving the window closes it.
 ## Engines
 
 `google`, `youdao`, `baidu`, `bing`, `baicizhan`, `haici`, `iciba`,
-`trans` (translate-shell CLI), `sdcv` (StarDict CLI), and `llm`
-(OpenAI-compatible LLM API).
+`trans` (translate-shell CLI), `sdcv` (StarDict CLI), `llm`
+(OpenAI-compatible LLM API), and `api` (API-documentation engine, see below).
 
 `trans` and `sdcv` shell out to external commands and must be installed
 separately. Some free endpoints (`google`, `bing`, `youdao`) may require a
@@ -165,6 +168,50 @@ vim.g.translator_llm = {
 ```
 
 `provider` may also be written as `name` (`name = "deepseek"`).
+
+## API documentation translation
+
+Because most translation in a code editor happens over code, the `api` engine
+(and the `:TranslateApi` command) translate a code symbol **together with its
+documentation** instead of doing a plain dictionary lookup.
+
+```vim
+:TranslateApi                          " word under cursor
+:TranslateApi requests.get             " explicit symbol
+:TranslateApi --target_lang=en map     " explicit target language
+```
+
+How it works:
+
+1. The current buffer's `filetype` is used as the programming-language hint
+   (e.g. `python`, `rust`, `javascript`).
+2. The symbol is sent to the configured LLM with an API-documentation prompt.
+3. The model decides whether the input is an API; if it is not (a plain word,
+   for example), it falls back to a normal translation.
+
+Output sections (only the applicable ones are shown):
+
+| Section | Content |
+| -------- | --------------------------------------------------- |
+| Summary | one-sentence description of what the API does (translated) |
+| Signature | exact signature / call form (kept verbatim) |
+| Parameters | parameter descriptions (translated) |
+| Returns | return value description (translated) |
+| Example | short usage example (code kept verbatim) |
+| Notes | deprecation / version / caveats (translated) |
+
+Code, signatures, identifiers and parameter names are always kept verbatim;
+only human-language descriptions are translated.
+
+The `api` engine shares the LLM configuration with the `llm` engine, so it
+requires `vim.g.translator_llm` (see above).
+
+Suggested keymaps:
+
+```lua
+vim.keymap.set("n", "<localLeader>tld", "<Cmd>TranslateApi<CR>", { desc = "API 文档翻译" })
+vim.keymap.set("v", "<localLeader>tld", ":TranslateApi<CR>", { desc = "API 文档翻译" })
+```
 
 ## Text-to-speech (朗诵)
 
@@ -277,6 +324,10 @@ vim.g.translator_tts_engine = "say"      -- "say" | "google"
 vim.g.translator_anki_deck = "翻译"      -- Anki deck name
 ```
 
+## Documentation
+
+`:help translator` — full Vim help document (`doc/translator.txt`).
+
 ## Development
 
 ```sh
@@ -312,4 +363,3 @@ The backend is a single crate under `rust/`. Each engine lives in
 ```vim
 :checkhealth translator
 ```
-
