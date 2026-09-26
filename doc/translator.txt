@@ -187,8 +187,8 @@ Suggested keymaps: >
     vim.g.translator_proxy_url = ""          -- e.g. "socks5://127.0.0.1:1080"
     vim.g.translator_history_enable = true   -- persist history
     vim.g.translator_window_type = "float"   -- "float" | "preview"
-    vim.g.translator_window_max_width = 0.4  -- fraction of columns
-    vim.g.translator_window_max_height = 0.3 -- fraction of lines
+    vim.g.translator_window_max_width = 999  -- max width (999 = no limit)
+    vim.g.translator_window_max_height = 999 -- max height (999 = no limit)
     vim.g.translator_bilingual = false       -- sentence-by-sentence view
     vim.g.translator_spinner = true          -- cursor spinner while translating
     vim.g.translator_default_engines = { "google", "youdao" }

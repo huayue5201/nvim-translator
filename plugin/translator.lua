@@ -14,8 +14,8 @@ vim.g.translator_proxy_url = vim.g.translator_proxy_url or ""
 vim.g.translator_source_lang = vim.g.translator_source_lang or "auto"
 vim.g.translator_target_lang = vim.g.translator_target_lang or "zh"
 
-vim.g.translator_window_max_width = vim.g.translator_window_max_width or 0.4
-vim.g.translator_window_max_height = vim.g.translator_window_max_height or 0.3
+vim.g.translator_window_max_width = vim.g.translator_window_max_width or 999
+vim.g.translator_window_max_height = vim.g.translator_window_max_height or 999
 vim.g.translator_window_type = vim.g.translator_window_type or "float"
 
 -- 双语对照显示（原文一句 / 译文一句交错），默认关闭

@@ -329,8 +329,8 @@ vim.g.translator_source_lang = "auto"    -- 默认源语言
 vim.g.translator_proxy_url = ""          -- 例如 "socks5://127.0.0.1:1080"
 vim.g.translator_history_enable = true   -- 持久化历史
 vim.g.translator_window_type = "float"   -- "float" | "preview"
-vim.g.translator_window_max_width = 0.4  -- 列数占比
-vim.g.translator_window_max_height = 0.3 -- 行数占比
+vim.g.translator_window_max_width = 999  -- 最大列数(999 = 不限制)
+vim.g.translator_window_max_height = 999 -- 最大行数(999 = 不限制)
 vim.g.translator_bilingual = false       -- 逐句对照显示
 vim.g.translator_spinner = true          -- 翻译时在光标处显示旋转提示
 vim.g.translator_default_engines = { "google", "youdao" }
