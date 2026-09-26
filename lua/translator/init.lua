@@ -117,22 +117,8 @@ end
 ---------------------------------------------------------------------
 local binary = require("translator.binary")
 
-function M.start(displaymode, opts, range, line1, line2, argstr)
+function M.start(displaymode, opts)
 	logger.init()
-
-	-- `start` 是用户配置可直接调用的公共接口，保留旧签名兼容：
-	--   start(displaymode, bang, range, line1, line2, argstr)
-	-- 新签名（内置命令使用）：
-	--   start(displaymode, opts)  -- opts = { bang, range, line1, line2, args }
-	if type(opts) ~= "table" then
-		opts = {
-			bang = opts,
-			range = range or 0,
-			line1 = line1 or 1,
-			line2 = line2 or 1,
-			args = argstr or "",
-		}
-	end
 
 	local options = cmdline.parse(opts)
 	if not options then
