@@ -72,7 +72,6 @@ pub struct Translation {
     pub phonetic: String,
     pub paraphrase: String,
     pub explains: Vec<String>,
-    pub alternative: Vec<String>,
 }
 
 #[derive(Serialize)]

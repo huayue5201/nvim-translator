@@ -2,9 +2,11 @@
 rust/target/
 bin/translator
 
-# Python (legacy)
-__pycache__/
-*.pyc
+# generated help tags
+doc/tags
+
+# runtime data (legacy)
+translation_history.data
 
 # misc
 *.o

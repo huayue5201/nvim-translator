@@ -46,7 +46,7 @@ local function compute_size(lines)
 end
 
 ---------------------------------------------------------------------
--- FIXED: split window support
+-- Position the window above or below the cursor.
 ---------------------------------------------------------------------
 local function compute_position(height)
 	local win_height = vim.api.nvim_win_get_height(0)

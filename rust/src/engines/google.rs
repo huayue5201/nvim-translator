@@ -80,22 +80,6 @@ fn parse(obj: Value, res: &mut Translation) {
             }
         }
     }
-
-    // obj[5]: alternatives
-    if let Some(alts) = obj.get(5).and_then(|v| v.as_array()) {
-        let base_paraphrase = res.paraphrase.clone();
-        for alt in alts {
-            if let Some(means) = alt.get(2).and_then(|v| v.as_array()) {
-                for m in means {
-                    if let Some(s) = first_of(m) {
-                        if !s.is_empty() && s != base_paraphrase {
-                            res.alternative.push(format!("* {}", s));
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -114,10 +98,7 @@ mod tests {
             ],
             null,
             null,
-            null,
-            [
-                [["感叹词"], ["hello"], [["你好"], ["您好"]]]
-            ]
+            null
         ]);
 
         let mut res = base("google", "en", "zh", "hello world");
@@ -126,6 +107,5 @@ mod tests {
         assert_eq!(res.paraphrase, "你好，世界");
         assert_eq!(res.phonetic, "həˈloʊ");
         assert_eq!(res.explains, vec!["[感叹词] 你好;喂"]);
-        assert_eq!(res.alternative, vec!["* 你好", "* 您好"]);
     }
 }

@@ -40,7 +40,7 @@ local function format_entry(text, trans)
 end
 
 ---------------------------------------------------------------------
--- FIXED: 只检查最后 50 条
+-- Persist the translation, de-duplicating against the last 50 entries.
 ---------------------------------------------------------------------
 function M.save(trans)
 	if not vim.g.translator_history_enable then
