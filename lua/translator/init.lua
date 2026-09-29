@@ -4,8 +4,15 @@ local cmdline = require("translator.cmdline")
 local logger = require("translator.logger")
 local job = require("translator.job")
 local cache = require("translator.cache")
+local config = require("translator.config")
 
 local M = {}
+
+--- Setup: merge user options (called by the plugin manager, e.g. lazy `opts`).
+---@param opts table|nil
+function M.setup(opts)
+	config.setup(opts)
+end
 
 ---------------------------------------------------------------------
 -- OpenAI-compatible LLM provider presets
@@ -74,7 +81,7 @@ local function resolve_base_url(cfg)
 end
 
 local function build_llm_env()
-	local cfg = vim.g.translator_llm
+	local cfg = config.get().llm
 	if not cfg or type(cfg) ~= "table" then
 		return nil
 	end
@@ -159,9 +166,10 @@ function M.translate(options, displaymode)
 		table.concat(options.engines, ","),
 	}
 
-	if vim.g.translator_proxy_url and vim.g.translator_proxy_url ~= "" then
+	local proxy = config.get().proxy_url
+	if proxy and proxy ~= "" then
 		table.insert(cmd, "--proxy")
-		table.insert(cmd, vim.g.translator_proxy_url)
+		table.insert(cmd, proxy)
 	end
 
 	-- Text last, so it can never be mistaken for an option value.

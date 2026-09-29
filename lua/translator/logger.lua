@@ -1,5 +1,7 @@
 -- File: lua/translator/logger.lua
 
+local config = require("translator.config")
+
 local M = {}
 
 local LOG = {}
@@ -7,7 +9,7 @@ local LOG = {}
 local LOG_FILE = vim.fn.stdpath("data") .. "/translator/log.txt"
 
 local function write_file(line)
-	if not vim.g.translator_debug then
+	if not config.get().debug then
 		return
 	end
 

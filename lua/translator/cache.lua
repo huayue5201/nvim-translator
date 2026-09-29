@@ -5,10 +5,11 @@
 --   value = { t = 写入时间戳, v = 解码后的 translations 表 }
 --
 -- 配置：
---   vim.g.translator_cache_enable = false  -- 关闭缓存（默认开启）
---   vim.g.translator_cache_ttl            -- 秒；0 = 永不过期（默认 7 天）
+--   require("translator").setup({ cache = { enable = false, ttl = 0 } })
 
 local M = {}
+
+local config = require("translator.config")
 
 local DEFAULT_TTL = 7 * 24 * 60 * 60 -- 7 天
 local MAX_ENTRIES = 500
@@ -49,7 +50,7 @@ local function save()
 end
 
 local function ttl()
-	local v = tonumber(vim.g.translator_cache_ttl)
+	local v = tonumber(config.get().cache.ttl)
 	if v == nil then
 		return DEFAULT_TTL
 	end
@@ -57,7 +58,7 @@ local function ttl()
 end
 
 local function enabled()
-	return vim.g.translator_cache_enable ~= false
+	return config.get().cache.enable ~= false
 end
 
 --- 稳定哈希（sha256，失败时退回 djb2）

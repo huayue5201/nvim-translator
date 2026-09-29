@@ -2,6 +2,7 @@
 -- Modern Neovim-native command line parser for translator.nvim
 
 local util = require("translator.util")
+local config = require("translator.config")
 local M = {}
 
 function M.parse(opts)
@@ -61,7 +62,7 @@ function M.parse(opts)
 	-- Defaults
 	-------------------------------------------------------------------
 	if #options.engines == 0 then
-		options.engines = vim.g.translator_default_engines or { "google" }
+		options.engines = config.get().engines
 		if type(options.engines) == "string" then
 			options.engines = vim.split(options.engines, ",", { trimempty = true })
 		end
@@ -69,10 +70,10 @@ function M.parse(opts)
 
 	-------------------------------------------------------------------
 	-- Bilingual display: --bilingual / --no-bilingual override the
-	-- global default (vim.g.translator_bilingual).
+	-- global default (config.bilingual).
 	-------------------------------------------------------------------
 	if options.bilingual == nil then
-		options.bilingual = not not vim.g.translator_bilingual
+		options.bilingual = not not config.get().bilingual
 	end
 
 	-------------------------------------------------------------------
@@ -94,11 +95,11 @@ function M.parse(opts)
 	else
 		options.source_lang = options.source_lang ~= ""
 				and options.source_lang
-			or vim.g.translator_source_lang
+			or config.get().source_lang
 			or "auto"
 		options.target_lang = options.target_lang ~= ""
 				and options.target_lang
-			or vim.g.translator_target_lang
+			or config.get().target_lang
 			or "zh"
 
 		-- Bang (!) swaps languages

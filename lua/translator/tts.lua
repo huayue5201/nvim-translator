@@ -5,6 +5,7 @@
 local binary = require("translator.binary")
 local util = require("translator.util")
 local state = require("translator.state")
+local config = require("translator.config")
 
 local M = {}
 
@@ -19,7 +20,7 @@ function M.speak(text, lang)
 		return
 	end
 
-	local engine = vim.g.translator_tts_engine or "say"
+	local engine = config.get().tts.engine
 	local cmd = { bin, "speak", "--text", text, "--lang", lang, "--engine", engine }
 
 	vim.fn.jobstart(cmd, {
@@ -54,7 +55,7 @@ function M.say(bang, opts)
 			lang = s.options.source_lang
 		else
 			text = util.get_text_from_context(opts)
-			lang = vim.g.translator_source_lang or "auto"
+			lang = config.get().source_lang or "auto"
 		end
 
 		text = util.text_proc(text)

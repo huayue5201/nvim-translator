@@ -1,9 +1,11 @@
 -- File: lua/translator/window.lua
 
+local config = require("translator.config")
+
 local M = {}
 
 local function get_wintype()
-	local t = vim.g.translator_window_type or "float"
+	local t = config.get().window.type or "float"
 	if t == "preview" then
 		return "preview"
 	end
@@ -24,12 +26,12 @@ local function compute_size(lines)
 	local min_w = 20
 	local min_h = 3
 
-	local max_w = vim.g.translator_window_max_width or 999
+	local max_w = config.get().window.max_width or 999
 	if max_w < 1 then
 		max_w = math.floor(max_w * vim.o.columns)
 	end
 
-	local max_h = vim.g.translator_window_max_height or 999
+	local max_h = config.get().window.max_height or 999
 	if max_h < 1 then
 		max_h = math.floor(max_h * vim.o.lines)
 	end

@@ -5,15 +5,13 @@
 
 local util = require("translator.util")
 local state = require("translator.state")
+local config_mod = require("translator.config")
 
 local M = {}
 
 local function config()
-	return {
-		port = vim.g.translator_anki_port or 8765,
-		deck = vim.g.translator_anki_deck or "翻译",
-		model = vim.g.translator_anki_model or "translator",
-	}
+	local c = config_mod.get().anki
+	return { port = c.port, deck = c.deck, model = c.model }
 end
 
 local function request(action, params)

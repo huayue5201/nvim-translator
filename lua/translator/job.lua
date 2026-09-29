@@ -6,6 +6,7 @@ local history = require("translator.history")
 local util = require("translator.util")
 local state = require("translator.state")
 local cache = require("translator.cache")
+local config = require("translator.config")
 
 local M = {}
 
@@ -78,8 +79,8 @@ function M.jobstart(cmd, displaymode, env, options, key)
 	current_key = key
 	vim.g.translator_status = "translating"
 
-	-- 请求延时期间在光标处显示旋转提示（可用 vim.g.translator_spinner 关闭）。
-	if vim.g.translator_spinner ~= false then
+	-- 请求延时期间在光标处显示旋转提示（可用 config.spinner.enable 关闭）。
+	if config.get().spinner.enable ~= false then
 		require("translator.spinner").start()
 	end
 

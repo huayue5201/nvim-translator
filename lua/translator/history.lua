@@ -1,6 +1,7 @@
 -- File: lua/translator/history.lua
 
 local util = require("translator.util")
+local config = require("translator.config")
 
 local M = {}
 
@@ -67,7 +68,7 @@ end
 -- Persist the translation, de-duplicating against the last 50 entries.
 ---------------------------------------------------------------------
 function M.save(trans)
-	if not vim.g.translator_history_enable then
+	if not config.get().history.enable then
 		return
 	end
 

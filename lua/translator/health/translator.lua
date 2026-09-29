@@ -32,7 +32,7 @@ end
 -- Check proxy (bing/google may require it)
 ---------------------------------------------------------------------
 local function check_proxy()
-	local proxy = vim.g.translator_proxy_url or ""
+	local proxy = require("translator.config").get().proxy_url or ""
 
 	if proxy == "" then
 		vim.health.warn("Proxy not configured", "Bing/Google translation may fail without proxy")

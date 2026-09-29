@@ -6,7 +6,7 @@
 --   引擎头 → 强调（Title）
 --   音标   → 弱化（Comment）
 --
--- 全部走 link + default=true；用户可用 vim.g.translator_highlights 覆盖，
+-- 全部走 link + default=true；用户可用 setup({ highlights = {...} }) 覆盖，
 -- 配色方案也能自由接管。
 
 local M = {}
@@ -44,11 +44,11 @@ function M.setup()
 	end
 end
 
---- 角色对应的实际高亮组（支持 vim.g.translator_highlights 覆盖；false/"" = 关闭）
+--- 角色对应的实际高亮组（支持 setup 的 highlights 覆盖；false/"" = 关闭）
 ---@param role string
 ---@return string|nil
 local function group_for(role)
-	local overrides = vim.g.translator_highlights
+	local overrides = require("translator.config").get().highlights
 	if type(overrides) == "table" and overrides[role] ~= nil then
 		if overrides[role] == false or overrides[role] == "" then
 			return nil

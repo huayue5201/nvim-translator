@@ -4,6 +4,8 @@
 
 local M = {}
 
+local config = require("translator.config")
+
 local DEFAULT_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 
 local state = {
@@ -48,7 +50,7 @@ end
 function M.start()
 	close()
 
-	local frames = vim.g.translator_spinner_frames or DEFAULT_FRAMES
+	local frames = config.get().spinner.frames or DEFAULT_FRAMES
 	if type(frames) ~= "table" or #frames == 0 then
 		return
 	end
@@ -81,7 +83,7 @@ function M.start()
 	pcall(vim.api.nvim_win_set_option, state.win, "winblend", 60)
 
 	state.frame = 1
-	local interval = vim.g.translator_spinner_interval or 80
+	local interval = config.get().spinner.interval or 80
 	state.timer = vim.fn.timer_start(interval, tick, { ["repeat"] = -1 })
 end
 

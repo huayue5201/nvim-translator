@@ -121,7 +121,7 @@ automatically: >
 <
 Explicit `--source_lang` / `--target_lang` override this. Window modes also
 accept `--bilingual` / `--no-bilingual` to toggle the sentence-by-sentence
-source/translation view (default: `vim.g.translator_bilingual`).
+source/translation view (default: `bilingual` in your config).
 
 ==============================================================================
 5. ENGINES                                                *translator-engines*
@@ -139,12 +139,14 @@ LLM ENGINE ~
 One generic engine covers every OpenAI-compatible provider (DeepSeek, OpenAI,
 Qwen, Kimi, Doubao, local Ollama, ...). The API key travels via an environment
 variable, never via argv. Example: >
-    vim.g.translator_llm = {
-        provider = "deepseek",
-        api_key  = function() return os.getenv("DEEPSEEK_API_KEY") end,
-        model    = "deepseek-chat",
-    }
-    vim.g.translator_default_engines = { "llm" }
+    require("translator").setup({
+        engines = { "llm" },
+        llm = {
+            provider = "deepseek",
+            api_key  = function() return os.getenv("DEEPSEEK_API_KEY") end,
+            model    = "deepseek-chat",
+        },
+    })
 <
 
 ==============================================================================
@@ -173,7 +175,7 @@ Code, signatures, identifiers and parameter names are always kept verbatim;
 only human-language descriptions are translated into the target language.
 
 The `api` engine shares the LLM configuration with the `llm` engine, so it
-requires `vim.g.translator_llm` (see |translator-engines|). Examples: >
+requires the `llm` config option (see |translator-engines|). Examples: >
     :TranslateApi                          " word under cursor
     :TranslateApi requests.get             " explicit symbol
     :TranslateApi --target_lang=en map     " explicit target language
@@ -186,28 +188,36 @@ Suggested keymaps: >
 ==============================================================================
 7. CONFIGURATION                                          *translator-config*
 
-                                                            *translator_*
+                                                          *translator.setup()*
 >
-    vim.g.translator_target_lang = "zh"      -- default target language
-    vim.g.translator_source_lang = "auto"    -- default source language
-    vim.g.translator_proxy_url = ""          -- e.g. "socks5://127.0.0.1:1080"
-    vim.g.translator_history_enable = true   -- persist history
-    vim.g.translator_cache_enable = true     -- reuse identical translations
-    vim.g.translator_cache_ttl = 604800      -- cache TTL in seconds (0 = never)
-    vim.g.translator_window_type = "float"   -- "float" | "preview"
-    vim.g.translator_window_max_width = 999  -- max width (999 = no limit)
-    vim.g.translator_window_max_height = 999 -- max height (999 = no limit)
-    vim.g.translator_bilingual = false       -- sentence-by-sentence view
-    vim.g.translator_spinner = true          -- cursor spinner while translating
-    vim.g.translator_default_engines = { "google", "youdao" }
-    vim.g.translator_debug = false           -- write logs to data dir
-    vim.g.translator_tts_engine = "say"      -- "say" | "google"
-    vim.g.translator_anki_deck = "翻译"      -- Anki deck name
-    vim.g.translator_anki_port = 8765        -- AnkiConnect port
-    vim.g.translator_anki_model = "translator" -- Anki note model
-    vim.g.translator_llm = { ... }           -- OpenAI-compatible LLM config
-    vim.g.translator_highlights = { ... }    -- override panel highlight groups
+    require("translator").setup({
+        source_lang = "auto",                 -- default source language
+        target_lang = "zh",                   -- default target language
+        bilingual = false,                    -- sentence-by-sentence view
+        engines = { "google", "youdao" },     -- default engines
+        proxy_url = "",                       -- e.g. "socks5://127.0.0.1:1080"
+        debug = false,                        -- write logs to data dir
+
+        llm = { ... },                        -- OpenAI-compatible LLM config
+
+        window = {
+            type = "float",                   -- "float" | "preview"
+            max_width = 999,                  -- 999 = no limit
+            max_height = 999,                 -- 999 = no limit
+        },
+        cache = {
+            enable = true,                    -- reuse identical translations
+            ttl = 604800,                     -- seconds; 0 = never expire
+        },
+        history = { enable = true },          -- persist history
+        spinner = { enable = true },          -- cursor spinner
+        tts = { engine = "say" },             -- "say" | "google"
+        anki = { deck = "翻译", port = 8765, model = "translator" },
+        highlights = { ... },                 -- override panel highlights
+    })
 <
+With lazy.nvim the same table goes in `opts` (lazy calls `setup(opts)` for
+you).
 
                                                                 *translator-cache*
 CACHE ~
@@ -215,7 +225,7 @@ CACHE ~
 Translations are cached and reused, so repeating an identical request (same
 text + languages + engines + LLM model/prompt) skips the backend entirely.
 The cache lives at `stdpath("data")/translator/cache.json`, holds at most 500
-entries (oldest evicted first), and expires after `translator_cache_ttl`
+entries (oldest evicted first), and expires after `cache.ttl`
 seconds (default 7 days). Use `--no-cache` to bypass it once, or
 |:TranslateCacheClear| to drop everything. Cache keys include the LLM
 provider/model/prompt, so switching models automatically misses old entries.
@@ -227,15 +237,17 @@ The panel uses restrained highlights: the source line and phonetic are dimmed,
 the engine header is accented, the leading markers (`•` / `↳`) are highlighted,
 the translated text inside `⟦ … ⟧` is emphasised, and the translation body stays
 at the default colour. Groups are defined with `default = true`, so a
-colourscheme can override them. To customise from your config: >
+colourscheme can override them. To customise: >
 
-    vim.g.translator_highlights = {
-        source      = "Comment",     " ⟦ … ⟧ brackets (false = disable)
-        source_text = "Identifier",  " the translated object itself
-        engine      = "Title",
-        phonetic    = "Comment",
-        marker      = "Special",     " • / ↳ line markers
-    }
+    require("translator").setup({
+        highlights = {
+            source      = "Comment",     " ⟦ … ⟧ brackets (false = disable)
+            source_text = "Identifier",  " the translated object itself
+            engine      = "Title",
+            phonetic    = "Comment",
+            marker      = "Special",     " • / ↳ line markers
+        },
+    })
 <
 
 ==============================================================================
