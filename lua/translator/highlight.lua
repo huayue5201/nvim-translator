@@ -16,6 +16,7 @@ local DEFAULT_ROLES = {
 	source = "TranslatorSource",
 	engine = "TranslatorEngine",
 	phonetic = "TranslatorPhonetic",
+	marker = "TranslatorMarker",
 }
 
 -- 基础/角色高亮组（default=true：不覆盖用户或配色方案的定义）
@@ -29,6 +30,7 @@ local BASE_GROUPS = {
 	TranslatorSource = { link = "Comment", default = true },
 	TranslatorEngine = { link = "Title", default = true },
 	TranslatorPhonetic = { link = "Comment", default = true },
+	TranslatorMarker = { link = "Special", default = true },
 }
 
 local NS = vim.api.nvim_create_namespace("translator_highlight")
@@ -70,7 +72,20 @@ function M.role_of(line)
 	return nil
 end
 
---- 给整个 buffer 按角色上色（整行高亮，兼容 fit_lines 的居中/换行）
+--- 行首标记（• / ↳）的字节范围；返回 0-based 起始与独占结束列
+---@param line string
+---@return integer|nil, integer|nil
+local function marker_span(line)
+	for _, m in ipairs({ "•", "↳" }) do
+		local s, e = line:find(m, 1, true)
+		if s then
+			return s - 1, e
+		end
+	end
+	return nil, nil
+end
+
+--- 给整个 buffer 按角色上色（角色=整行；标记=行内局部）
 ---@param bufnr integer
 function M.apply(bufnr)
 	M.setup()
@@ -80,10 +95,22 @@ function M.apply(bufnr)
 
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	for i, line in ipairs(lines) do
+		local row = i - 1
+
+		-- 整行角色（原文 / 引擎头 / 音标）
 		local role = M.role_of(line)
-		local group = role and group_for(role)
-		if group then
-			vim.api.nvim_buf_set_extmark(bufnr, NS, i - 1, 0, { line_hl_group = group })
+		local line_group = role and group_for(role)
+		if line_group then
+			vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, { line_hl_group = line_group })
+		end
+
+		-- 行首标记（• / ↳）只染标记本身
+		local mstart, mend = marker_span(line)
+		if mstart then
+			local marker_group = group_for("marker")
+			if marker_group then
+				vim.api.nvim_buf_set_extmark(bufnr, NS, row, mstart, { end_col = mend, hl_group = marker_group })
+			end
 		end
 	end
 end
