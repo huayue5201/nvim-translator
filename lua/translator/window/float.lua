@@ -162,6 +162,9 @@ local function build(lines, cfg, enter, win_cfg)
 	-- 创建 buffer
 	local bufnr = buffer.create_scratch_buf(lines)
 
+	-- 克制风行级高亮（原文/引擎头/音标）
+	require("translator.highlight").apply(bufnr)
+
 	-- 单层浮窗，使用 double border
 	state_win.win = vim.api.nvim_open_win(bufnr, enter, vim.tbl_extend("force", {
 		width = cfg.width,

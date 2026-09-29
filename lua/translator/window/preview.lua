@@ -24,6 +24,7 @@ function M.create(lines, cfg)
 	close()
 
 	local bufnr = buffer.create_scratch_buf(lines)
+	require("translator.highlight").apply(bufnr)
 
 	-------------------------------------------------------------------
 	-- Preview window (single border, fixed position)

@@ -53,6 +53,11 @@ else
 end
 
 ---------------------------------------------------------------------
+-- Highlights (restrained: dim source/phonetic, accent engine header)
+---------------------------------------------------------------------
+require("translator.highlight").setup()
+
+---------------------------------------------------------------------
 -- Commands
 ---------------------------------------------------------------------
 local function run_translate(displaymode, opts)

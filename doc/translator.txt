@@ -206,6 +206,7 @@ Suggested keymaps: >
     vim.g.translator_anki_port = 8765        -- AnkiConnect port
     vim.g.translator_anki_model = "translator" -- Anki note model
     vim.g.translator_llm = { ... }           -- OpenAI-compatible LLM config
+    vim.g.translator_highlights = { ... }    -- override panel highlight groups
 <
 
                                                                 *translator-cache*
@@ -218,6 +219,21 @@ entries (oldest evicted first), and expires after `translator_cache_ttl`
 seconds (default 7 days). Use `--no-cache` to bypass it once, or
 |:TranslateCacheClear| to drop everything. Cache keys include the LLM
 provider/model/prompt, so switching models automatically misses old entries.
+
+                                                                *translator-highlights*
+HIGHLIGHTS ~
+
+The panel uses restrained line highlights: the source line and phonetic are
+dimmed, the engine header is accented, and the translation body stays at the
+default colour. Groups are defined with `default = true`, so a colourscheme can
+override them. To customise from your config: >
+
+    vim.g.translator_highlights = {
+        source   = "Comment",  " set to false to disable
+        engine   = "Title",
+        phonetic = "Comment",
+    }
+<
 
 ==============================================================================
 8. DEVELOPMENT                                        *translator-development*
