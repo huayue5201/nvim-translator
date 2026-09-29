@@ -1,5 +1,6 @@
 # Rust build artifacts
 rust/target/
+rust/lcov.info
 bin/translator
 
 # generated help tags

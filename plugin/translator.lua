@@ -24,6 +24,10 @@ vim.g.translator_bilingual = vim.g.translator_bilingual or false
 -- 翻译请求进行中时，在光标处显示旋转提示（默认开启）
 vim.g.translator_spinner = vim.g.translator_spinner or true
 
+-- 翻译结果缓存（跨会话持久化，带 TTL；0 表示永不过期）
+-- TTL 默认 7 天，见 lua/translator/cache.lua
+vim.g.translator_cache_enable = vim.g.translator_cache_enable ~= false
+
 -- LLM config: { provider|base_url, api_key, model, prompt?, timeout? }
 -- Preset providers: deepseek, openai, ollama, qwen, kimi, doubao
 vim.g.translator_llm = vim.g.translator_llm or {}
@@ -89,6 +93,11 @@ end, {})
 
 vim.api.nvim_create_user_command("TranslateL", function()
 	require("translator.logger").open_log()
+end, {})
+
+vim.api.nvim_create_user_command("TranslateCacheClear", function()
+	require("translator.cache").clear()
+	vim.notify("Translator cache cleared", vim.log.levels.INFO)
 end, {})
 
 vim.api.nvim_create_user_command("TranslateSay", function(opts)

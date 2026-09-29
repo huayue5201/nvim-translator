@@ -14,11 +14,35 @@ end
 
 local HISTORY = history_path()
 
-local function format_entry(text, trans)
-	local left = text
-	if #left > 30 then
-		left = left:sub(1, 30) .. "..."
+---------------------------------------------------------------------
+-- UTF-8 安全：按显示宽度截断，避免切断多字节字符产生非法字节
+---------------------------------------------------------------------
+local function truncate_display(s, max_width)
+	if vim.fn.strdisplaywidth(s) <= max_width then
+		return s
 	end
+	local limit = math.max(0, max_width - 3) -- 预留 "..."
+	local out = ""
+	for _, ch in ipairs(vim.fn.split(s, "\\zs")) do
+		if vim.fn.strdisplaywidth(out .. ch) > limit then
+			break
+		end
+		out = out .. ch
+	end
+	return out .. "..."
+end
+
+-- 按显示宽度右侧补空格（中文每字宽 2，不能用字节长度对齐）
+local function pad_display(s, width)
+	local w = vim.fn.strdisplaywidth(s)
+	if w >= width then
+		return s
+	end
+	return s .. string.rep(" ", width - w)
+end
+
+local function format_entry(text, trans)
+	local left = truncate_display(text, 30)
 
 	local right = nil
 
@@ -36,7 +60,7 @@ local function format_entry(text, trans)
 		return nil
 	end
 
-	return string.format("%-32s %s", left, right)
+	return pad_display(left, 32) .. " " .. right
 end
 
 ---------------------------------------------------------------------
@@ -81,7 +105,13 @@ function M.export()
 	end
 
 	vim.cmd("tabnew " .. HISTORY)
+	-- 显式按 UTF-8 读取，避免文件中偶发的非法字节导致整体回退到 latin1
+	vim.bo.fileencoding = "utf-8"
 	vim.bo.filetype = "translator_history"
 end
+
+-- 导出内部函数供测试
+M._format_entry = format_entry
+M._truncate_display = truncate_display
 
 return M

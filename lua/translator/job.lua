@@ -5,11 +5,33 @@ local action = require("translator.action")
 local history = require("translator.history")
 local util = require("translator.util")
 local state = require("translator.state")
+local cache = require("translator.cache")
 
 local M = {}
 
 local stdout_save = nil
 local current_options = nil
+local current_key = nil
+
+---------------------------------------------------------------------
+-- Apply a (fresh or cached) translation result: state + display + history.
+---------------------------------------------------------------------
+function M.apply_result(displaymode, translations, options)
+	stdout_save = translations
+	state.set(translations, options)
+
+	if displaymode == "echo" then
+		action.echo(translations)
+	elseif displaymode == "window" then
+		action.window(translations, options)
+	elseif displaymode == "interactive" then
+		action.interactive(translations, options)
+	else
+		action.replace(translations)
+	end
+
+	history.save(translations)
+end
 
 ---------------------------------------------------------------------
 -- Handle buffered job output (stdout carries the JSON result).
@@ -38,20 +60,9 @@ local function handle_output(displaymode, data, event)
 			return
 		end
 
-		stdout_save = translations
-		state.set(translations, current_options)
-
-		if displaymode == "echo" then
-			action.echo(translations)
-		elseif displaymode == "window" then
-			action.window(translations, current_options)
-		elseif displaymode == "interactive" then
-			action.interactive(translations, current_options)
-		else
-			action.replace(translations)
-		end
-
-		history.save(translations)
+		-- 先写缓存，这样重复请求可以完全跳过后端。
+		cache.set(current_key, translations)
+		M.apply_result(displaymode, translations, current_options)
 	elseif event == "stderr" then
 		util.show_msg(message, "error")
 
@@ -61,9 +72,10 @@ local function handle_output(displaymode, data, event)
 	end
 end
 
-function M.jobstart(cmd, displaymode, env, options)
+function M.jobstart(cmd, displaymode, env, options, key)
 	stdout_save = nil
 	current_options = options
+	current_key = key
 	vim.g.translator_status = "translating"
 
 	-- 请求延时期间在光标处显示旋转提示（可用 vim.g.translator_spinner 关闭）。

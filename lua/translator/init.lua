@@ -3,6 +3,7 @@
 local cmdline = require("translator.cmdline")
 local logger = require("translator.logger")
 local job = require("translator.job")
+local cache = require("translator.cache")
 
 local M = {}
 
@@ -134,6 +135,18 @@ function M.translate(options, displaymode)
 		return
 	end
 
+	local env = build_llm_env()
+	local key = cache.key(options, env)
+
+	-- 命中缓存：直接复用，不启动后端进程。
+	if not options.force then
+		local cached = cache.get(key)
+		if cached then
+			job.apply_result(displaymode, cached, options)
+			return
+		end
+	end
+
 	-- Build argv (no shell quoting needed; text is passed as a single element).
 	local cmd = {
 		bin,
@@ -156,7 +169,7 @@ function M.translate(options, displaymode)
 
 	logger.log(table.concat(cmd, " "))
 
-	job.jobstart(cmd, displaymode, build_llm_env(), options)
+	job.jobstart(cmd, displaymode, env, options, key)
 end
 
 ---------------------------------------------------------------------

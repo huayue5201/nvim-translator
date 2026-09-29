@@ -26,6 +26,8 @@ function M.parse(opts)
 				options.bilingual = true
 			elseif arg == "--no-bilingual" then
 				options.bilingual = false
+			elseif arg == "--no-cache" then
+				options.force = true -- 绕过翻译缓存，强制重新请求
 			end
 		elseif arg:match("^%-%-[^=]+=.+$") then
 			local key, val = arg:match("^%-%-(.-)=(.+)$")
@@ -118,6 +120,7 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
 		"--target_lang=",
 		"--bilingual",
 		"--no-bilingual",
+		"--no-cache",
 	}
 
 	local engines = {
