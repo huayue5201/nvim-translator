@@ -14,6 +14,7 @@ local M = {}
 -- 角色 → 默认高亮组
 local DEFAULT_ROLES = {
 	source = "TranslatorSource",
+	source_text = "TranslatorSourceText",
 	engine = "TranslatorEngine",
 	phonetic = "TranslatorPhonetic",
 	marker = "TranslatorMarker",
@@ -28,6 +29,7 @@ local BASE_GROUPS = {
 	FloatFooter = { link = "Comment", default = true },
 	-- 内容角色
 	TranslatorSource = { link = "Comment", default = true },
+	TranslatorSourceText = { link = "Identifier", default = true },
 	TranslatorEngine = { link = "Title", default = true },
 	TranslatorPhonetic = { link = "Comment", default = true },
 	TranslatorMarker = { link = "Special", default = true },
@@ -85,7 +87,22 @@ local function marker_span(line)
 	return nil, nil
 end
 
---- 给整个 buffer 按角色上色（角色=整行；标记=行内局部）
+--- 原文文本（⟦ … ⟧ 内部）的字节范围；返回 0-based 起始与独占结束列
+---@param line string
+---@return integer|nil, integer|nil
+local function source_span(line)
+	local _, l_end = line:find("⟦", 1, true)
+	if not l_end then
+		return nil, nil
+	end
+	local r_start = line:find("⟧", l_end + 1, true)
+	if not r_start then
+		return nil, nil
+	end
+	return l_end, r_start - 1
+end
+
+--- 给整个 buffer 上色（角色=整行；原文/标记=行内局部）
 ---@param bufnr integer
 function M.apply(bufnr)
 	M.setup()
@@ -97,11 +114,20 @@ function M.apply(bufnr)
 	for i, line in ipairs(lines) do
 		local row = i - 1
 
-		-- 整行角色（原文 / 引擎头 / 音标）
+		-- 整行角色（原文行 / 引擎头 / 音标）
 		local role = M.role_of(line)
 		local line_group = role and group_for(role)
 		if line_group then
 			vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, { line_hl_group = line_group })
+		end
+
+		-- 被译对象：⟦ … ⟧ 内部的原文用强调色（覆盖整行的弱化）
+		local sstart, send = source_span(line)
+		if sstart then
+			local st_group = group_for("source_text")
+			if st_group then
+				vim.api.nvim_buf_set_extmark(bufnr, NS, row, sstart, { end_col = send, hl_group = st_group })
+			end
 		end
 
 		-- 行首标记（• / ↳）只染标记本身

@@ -225,15 +225,16 @@ HIGHLIGHTS ~
 
 The panel uses restrained highlights: the source line and phonetic are dimmed,
 the engine header is accented, the leading markers (`•` / `↳`) are highlighted,
-and the translation body stays at the default colour. Groups are defined with
-`default = true`, so a colourscheme can override them. To customise from your
-config: >
+the translated text inside `⟦ … ⟧` is emphasised, and the translation body stays
+at the default colour. Groups are defined with `default = true`, so a
+colourscheme can override them. To customise from your config: >
 
     vim.g.translator_highlights = {
-        source   = "Comment",  " set to false to disable
-        engine   = "Title",
-        phonetic = "Comment",
-        marker   = "Special",  " • / ↳ line markers
+        source      = "Comment",     " ⟦ … ⟧ brackets (false = disable)
+        source_text = "Identifier",  " the translated object itself
+        engine      = "Title",
+        phonetic    = "Comment",
+        marker      = "Special",     " • / ↳ line markers
     }
 <
 
