@@ -2,6 +2,7 @@
 -- Neovim-native preview window for translator.nvim
 
 local buffer = require("translator.buffer")
+local async = require("translator.async")
 local M = {}
 
 local state = {
@@ -51,7 +52,7 @@ function M.create(lines, cfg)
 		group = aug,
 		buffer = 0,
 		callback = function()
-			vim.defer_fn(close, 10)
+			async.delay(10, close)
 		end,
 	})
 

@@ -10,6 +10,8 @@
 
 local M = {}
 
+local async = require("translator.async")
+
 -- Border highlights (default = true so users can override them).
 vim.api.nvim_set_hl(0, "TranslatorInputActive", { fg = "#5FAFFF", default = true })
 vim.api.nvim_set_hl(0, "TranslatorInputInactive", { fg = "#666666", default = true })
@@ -210,7 +212,7 @@ function M.open(opts)
 
 		history_index[field_key] = new_index
 
-		vim.schedule(function()
+		async.defer(function()
 			local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 			local line_len = lines[1] and #lines[1] or 0
 			pcall(vim.api.nvim_win_set_cursor, windows[current_focus_index].win, { 1, line_len })
@@ -229,7 +231,7 @@ function M.open(opts)
 		end
 		is_closing = true
 
-		vim.schedule(function()
+		async.defer(function()
 			for _, w in ipairs(windows) do
 				if w.win and vim.api.nvim_win_is_valid(w.win) then
 					pcall(vim.api.nvim_win_close, w.win, true)
@@ -319,7 +321,7 @@ function M.open(opts)
 
 			if on_submit then
 				-- 窗口先关闭，再执行提交（避免同步 curl 期间窗口滞留）
-				vim.schedule(function()
+				async.defer(function()
 					on_submit(result)
 				end)
 			end

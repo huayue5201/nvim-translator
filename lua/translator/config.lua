@@ -33,6 +33,7 @@ local M = {}
 ---@field bilingual boolean
 ---@field engines string[]|string|nil -- nil → derived from target_lang
 ---@field proxy_url string
+---@field request_timeout integer -- ms; <= 0 = no timeout
 ---@field llm table
 ---@field window translator.WindowConfig
 ---@field cache translator.CacheConfig
@@ -49,6 +50,8 @@ local defaults = {
 	bilingual = false,
 	-- engines 默认按 target_lang 推导（见 setup）
 	proxy_url = "",
+	-- 单次后端请求的超时（毫秒）；<= 0 表示不限制。
+	request_timeout = 15000,
 	llm = {},
 	window = {
 		type = "float",

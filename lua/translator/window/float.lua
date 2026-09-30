@@ -10,6 +10,7 @@ local util = require("translator.util")
 local state = require("translator.state")
 local tts = require("translator.tts")
 local anki = require("translator.anki")
+local async = require("translator.async")
 
 local M = {}
 
@@ -132,11 +133,16 @@ end
 ---------------------------------------------------------------------
 local function footer()
 	return {
-		{ "s", "Special" }, { " 原文  ", "FloatFooter" },
-		{ "S", "Special" }, { " 译文  ", "FloatFooter" },
-		{ "a", "Special" }, { " Anki  ", "FloatFooter" },
-		{ "y", "Special" }, { " 复制  ", "FloatFooter" },
-		{ "Esc", "Special" }, { " 关闭", "FloatFooter" },
+		{ "s", "Special" },
+		{ " 原文  ", "FloatFooter" },
+		{ "S", "Special" },
+		{ " 译文  ", "FloatFooter" },
+		{ "a", "Special" },
+		{ " Anki  ", "FloatFooter" },
+		{ "y", "Special" },
+		{ " 复制  ", "FloatFooter" },
+		{ "Esc", "Special" },
+		{ " 关闭", "FloatFooter" },
 	}
 end
 
@@ -166,13 +172,17 @@ local function build(lines, cfg, enter, win_cfg)
 	require("translator.highlight").apply(bufnr)
 
 	-- 单层浮窗，使用 double border
-	state_win.win = vim.api.nvim_open_win(bufnr, enter, vim.tbl_extend("force", {
-		width = cfg.width,
-		height = cfg.height,
-		style = "minimal",
-		border = "rounded",
-		zindex = 100,
-	}, win_cfg))
+	state_win.win = vim.api.nvim_open_win(
+		bufnr,
+		enter,
+		vim.tbl_extend("force", {
+			width = cfg.width,
+			height = cfg.height,
+			style = "minimal",
+			border = "rounded",
+			zindex = 100,
+		}, win_cfg)
+	)
 	vim.api.nvim_win_set_option(state_win.win, "winhl", "Normal:Translator")
 
 	-- 可选：设置浮窗永远不被其他窗口覆盖（需要 Neovim 0.9+）
@@ -222,7 +232,7 @@ function M.create(lines, cfg)
 		group = aug,
 		buffer = 0,
 		callback = function()
-			vim.defer_fn(close, 10)
+			async.delay(10, close)
 		end,
 	})
 
@@ -251,7 +261,7 @@ function M.create_interactive(lines, cfg)
 		group = aug,
 		pattern = tostring(win),
 		callback = function()
-			vim.defer_fn(close, 10)
+			async.delay(10, close)
 		end,
 	})
 

@@ -6,24 +6,28 @@ local M = {}
 
 local config = require("translator.config")
 
+local async = vim.async
+
 local DEFAULT_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
 
 local state = {
 	win = nil,
 	buf = nil,
-	timer = nil,
 	frame = 0,
 	frames = nil,
 }
+
+-- 动画任务（后台运行，close 时取消）
+local spinner_task = nil
 
 local function win_valid(win)
 	return win and vim.api.nvim_win_is_valid(win)
 end
 
 local function close()
-	if state.timer then
-		pcall(vim.fn.timer_stop, state.timer)
-		state.timer = nil
+	if spinner_task then
+		spinner_task:close()
+		spinner_task = nil
 	end
 	if win_valid(state.win) then
 		pcall(vim.api.nvim_win_close, state.win, true)
@@ -84,7 +88,14 @@ function M.start()
 
 	state.frame = 1
 	local interval = config.get().spinner.interval or 80
-	state.timer = vim.fn.timer_start(interval, tick, { ["repeat"] = -1 })
+	spinner_task = async
+		.run(function()
+			while not async.is_closing() do
+				async.sleep(interval)
+				tick()
+			end
+		end)
+		:detach()
 end
 
 M.close = close
