@@ -44,6 +44,7 @@ make build
 | `:TranslateApi` | 翻译代码 API 符号及其文档 |
 | `:TranslateSay` | 朗读原文(`!` = 朗读译文) |
 | `:TranslateA` | 把上次翻译加入 Anki(通过 AnkiConnect) |
+| `:TranslateCancel` | 中断正在进行的翻译请求 |
 | `:TranslateH` | 打开翻译历史 |
 | `:TranslateL` | 打开调试日志 |
 
@@ -66,6 +67,15 @@ make build
 | `<Esc>` | 关闭窗口 |
 
 移动光标同样会关闭窗口,与之前一致。
+
+翻译请求进行中时,`<Esc>` 会中断它(结束后端进程并停止旋转提示)。该键仅在
+普通/可视模式下、且你尚未自行映射该键时临时绑定,请求结束后自动移除。可用
+`cancel_key = false` 关闭,或用 `:TranslateCancel` 显式中断。
+
+多引擎结果**增量显示**:**第一个**引擎返回就弹出浮窗,之后每多一个引擎就在底部追加
+一段、窗口随之增高(按到达顺序),不再等最慢的源。仍有请求未返回时,末尾显示
+`⏳ 还有 N 个翻译中…`,全部返回后自动消失;窗口只长大、不跳动。设 `incremental = false`
+可回退为“全部返回后一次性显示”。仅对 `:Translate` / `:TranslateI` 浮窗生效。
 
 选项(以 `--key=value` 形式传入):
 
@@ -151,20 +161,42 @@ vim.g.translator_bilingual = true
 `trans` 和 `sdcv` 会调用外部命令,需要单独安装。部分免费接口(`google`、
 `bing`、`youdao`)在某些地区可能需要代理。
 
+### 百度引擎
+
+配置 [百度翻译开放平台](https://fanyi-api.baidu.com/) 的 `appid` + `key` 后,
+`baidu` 引擎即可翻译**整句**。不配置凭证时会回退到免费的 `/sug` 词典接口,
+该接口**仅支持单词**(整句返回空)。
+
+```lua
+require("translator").setup({
+    engines = { "baidu", "google" },
+    baidu = {
+        appid = "2024xxxxxxxxx",
+        key   = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        -- 也可读环境变量名:
+        -- appid_name = "BAIDU_APPID", key_name = "BAIDU_KEY",
+    },
+})
+```
+
+官方接口按源文字符数计费;个人使用免费(免费实名认证后 100万字符/月)。
+
 ### LLM 引擎
 
 一个通用引擎即可覆盖所有 OpenAI 兼容提供商(DeepSeek、OpenAI、Qwen、Kimi、
-Doubao、本地 Ollama 等)。配置一次后,把 `llm` 设为默认引擎即可:
+Doubao、本地 Ollama / llama.cpp 等)。配置一次后,把 `llm` 设为默认引擎即可:
 
 ```lua
-vim.g.translator_llm = {
-    provider = "deepseek",   -- 预设: deepseek|openai|ollama|qwen|kimi|doubao
-    api_key = "sk-...",       -- ollama 不需要
-    -- model = "deepseek-chat", -- 可选,预设会提供默认值
-    -- prompt = "...",         -- 可选,{sl} 和 {tl} 会被替换
-    -- timeout = 60,           -- 可选,单位秒
-}
-vim.g.translator_default_engines = { "llm" }
+require("translator").setup({
+    engines = { "llm" },
+    llm = {
+        provider = "deepseek",   -- 预设: deepseek|openai|ollama|qwen|kimi|doubao
+        api_key = "sk-...",       -- 本地端点(ollama / llama.cpp)不需要
+        -- model = "deepseek-chat", -- 可选,预设会提供默认值
+        -- prompt = "...",         -- 可选,{sl} 和 {tl} 会被替换
+        -- timeout = 60,           -- 可选,单位秒
+    },
+})
 ```
 
 除了 `provider` 也可以直接传 `base_url`(例如自建端点)。API key 通过环境变量
@@ -173,23 +205,178 @@ vim.g.translator_default_engines = { "llm" }
 `api_key` 支持多种写法,无需硬编码:
 
 ```lua
-vim.g.translator_llm = {
-    provider = "deepseek",
-    -- 1) 字符串
-    -- api_key = "sk-...",
-    -- 2) 惰性函数
-    api_key = function() return os.getenv("DEEPSEEK_API_KEY") end,
-    -- 3) 环境变量名
-    -- api_key_name = "DEEPSEEK_API_KEY",
-    -- 4) 嵌套 env 形式(codecompanion 风格)
-    -- env = { api_key = function() return os.getenv("DEEPSEEK_API_KEY") end },
-    model = "deepseek-chat",
-    -- 也接受 codecompanion 风格的 model 默认值:
-    -- schema = { model = { default = "deepseek-chat" } },
-}
+require("translator").setup({
+    llm = {
+        provider = "deepseek",
+        -- 1) 字符串
+        -- api_key = "sk-...",
+        -- 2) 惰性函数
+        api_key = function() return os.getenv("DEEPSEEK_API_KEY") end,
+        -- 3) 环境变量名
+        -- api_key_name = "DEEPSEEK_API_KEY",
+        -- 4) 嵌套 env 形式(codecompanion 风格)
+        -- env = { api_key = function() return os.getenv("DEEPSEEK_API_KEY") end },
+        model = "deepseek-chat",
+        -- 也接受 codecompanion 风格的 model 默认值:
+        -- schema = { model = { default = "deepseek-chat" } },
+    },
+})
 ```
 
 `provider` 也可写成 `name`(`name = "deepseek"`)。
+
+### LLM 降级(主端点 + 本地兜底)
+
+可以配置一个**降级端点** `llm.fallback`:主端点(如 DeepSeek)请求失败或无
+有效结果时,后端会自动改请求降级端点。这非常适合「在线 DeepSeek 为主,
+断网时本地 llama.cpp 兜底」的组合:
+
+```lua
+require("translator").setup({
+    engines = { "llm" },
+    llm = {
+        -- 主端点:DeepSeek(在线,质量优先)
+        name = "deepseek",
+        env = {
+            api_key = function() return os.getenv("DEEPSEEK_API_KEY") end,
+        },
+        schema = { model = { default = "deepseek-chat" } },
+
+        -- 降级端点:本地 llama.cpp(断网/主端点失败时自动使用)
+        fallback = {
+            base_url = "http://127.0.0.1:8080/v1",
+            model = "qwen2.5-7b",
+            -- prompt 不设则继承主端点 prompt
+        },
+    },
+})
+```
+
+降级触发条件:主端点返回**空结果**(所有引擎都失败时后端仍会输出合法 JSON
+但 `results` 为空,这类结果不会被缓存,也不会被当作有效译文)。网络错误、
+401、超时、或响应缺少内容都会触发降级。
+
+### 本地 LLM 服务(按需启动 + 空闲回收)
+
+当 `llm` 或 `llm.fallback` 指向本地服务(llama.cpp / llama-server)时,可以
+配置 `llm.server` 让插件**自动管理服务生命周期**:
+
+- **按需启动**:翻译前若服务未运行,插件自动拉起并异步等待就绪(不阻塞 UI)。
+- **活跃标记**:每次成功翻译后写入时间戳文件。
+- **空闲回收**:外部 watchdog(launchd 定时器)依据时间戳,空闲超时后自动
+  停止服务,释放常驻内存。
+
+```lua
+require("translator").setup({
+    llm = {
+        -- ... 主端点 / fallback ...
+        server = {
+            cmd = {
+                "/opt/homebrew/bin/llama-server",
+                "-m", vim.fn.expand("~/models/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"),
+                "--alias", "qwen2.5-7b",
+                "--host", "127.0.0.1",
+                "--port", "8080",
+                "-c", "8192",
+            },
+            health = "http://127.0.0.1:8080/health", -- 健康检查地址
+            wait = 120,        -- 等待服务就绪的最长秒数
+            poll_ms = 1000,    -- 健康检查轮询间隔(毫秒)
+            stamp = vim.fn.expand("~/.cache/translator/llm.last_active"), -- 活跃时间戳
+        },
+    },
+})
+```
+
+### 本地 LLM 安装(llama.cpp)
+
+以 macOS 上的 **llama.cpp** 为例(其他平台同理,命令路径略有差异):
+
+**1. 安装 llama.cpp**
+
+```sh
+brew install llama.cpp   # 提供 llama-server 二进制
+```
+
+**2. 下载模型(GGUF)**
+
+推荐 **Qwen2.5-7B-Instruct** 的 **Q4_K_M** 量化版(~4.7GB,16GB 内存的甜点):
+
+```sh
+mkdir -p ~/models && cd ~/models
+# ModelScope(国内镜像,速度快):
+curl -L -C - -o qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf \
+  "https://modelscope.cn/models/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/master/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+curl -L -C - -o qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf \
+  "https://modelscope.cn/models/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/master/qwen2.5-7b-instruct-q4_k_m-00002-of-00002.gguf"
+# 或 HuggingFace:
+#   https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF
+```
+
+**3. 手动启动服务(验证用)**
+
+```sh
+llama-server \
+  -m ~/models/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf \
+  --alias qwen2.5-7b --host 127.0.0.1 --port 8080 -c 8192
+```
+
+llama.cpp 会自动识别同目录下的 `-00002-of-00002.gguf` 分片,无需合并。
+
+**4. 空闲回收 watchdog(macOS launchd)**
+
+创建 `~/models/llm-watchdog.sh`:
+
+```sh
+#!/usr/bin/env bash
+set -euo pipefail
+STAMP="$HOME/.cache/translator/llm.last_active"
+IDLE_TIMEOUT="${TRANSLATOR_LLM_IDLE:-600}"  # 秒,默认 10 分钟
+PID_CMD="/opt/homebrew/bin/llama-server"
+
+[ -f "$STAMP" ] || exit 0
+now=$(date +%s)
+last=$(stat -f%m "$STAMP" 2>/dev/null || echo "$now")
+age=$((now - last))
+
+if [ "$age" -ge "$IDLE_TIMEOUT" ] && pgrep -f "$PID_CMD" >/dev/null 2>&1; then
+  echo "$(date '+%F %T') 空闲 ${age}s,停止 llama-server" >>"$HOME/models/llm-watchdog.log"
+  pkill -f "$PID_CMD" || true
+fi
+```
+
+然后创建 `~/Library/LaunchAgents/com.translator.llm-watchdog.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.translator.llm-watchdog</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/you/models/llm-watchdog.sh</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>StartInterval</key><integer>300</integer>
+    <key>StandardOutPath</key><string>/Users/you/models/llm-watchdog.log</string>
+    <key>StandardErrorPath</key><string>/Users/you/models/llm-watchdog.log</string>
+</dict>
+</plist>
+```
+
+加载:
+
+```sh
+chmod +x ~/models/llm-watchdog.sh
+launchctl load ~/Library/LaunchAgents/com.translator.llm-watchdog.plist
+```
+
+现在服务会在翻译时按需启动,空闲 10 分钟后自动停止释放内存。
+
+> **说明**:本地 7B 量化模型的质量无法与 DeepSeek 等在线大模型相比,建议作为
+> **离线兜底**使用(即上面的 `llm.fallback` 组合),而不是唯一主力。
 
 ## API 文档翻译
 
@@ -222,8 +409,9 @@ vim.g.translator_llm = {
 
 代码、签名、标识符和参数名始终保持原文,只翻译人类语言说明。
 
-`api` 引擎与 `llm` 引擎共用 LLM 配置,因此需要 `vim.g.translator_llm`
-(见上文)。
+`api` 引擎与 `llm` 引擎共用 LLM 配置(即 `llm` 配置项)。它同样支持
+`llm.fallback`:主端点失败时,api 引擎会改用**简化 prompt**(概述 + 若干要点)
+重试降级端点——本地小模型也能稳定跟随。
 
 建议按键映射:
 
@@ -324,21 +512,56 @@ vim.g.translator_anki_model = "translator" -- 笔记类型(自动创建)
 ## 配置
 
 ```lua
-vim.g.translator_target_lang = "zh"      -- 默认目标语言
-vim.g.translator_source_lang = "auto"    -- 默认源语言
-vim.g.translator_proxy_url = ""          -- 例如 "socks5://127.0.0.1:1080"
-vim.g.translator_history_enable = true   -- 持久化历史
-vim.g.translator_window_type = "float"   -- "float" | "preview"
-vim.g.translator_window_max_width = 999  -- 最大列数(999 = 不限制)
-vim.g.translator_window_max_height = 999 -- 最大行数(999 = 不限制)
-vim.g.translator_bilingual = false       -- 逐句对照显示
-vim.g.translator_spinner = true          -- 翻译时在光标处显示旋转提示
-vim.g.translator_default_engines = { "google", "youdao" }
-vim.g.translator_debug = false           -- 写入日志到数据目录
+require("translator").setup({
+    source_lang = "auto",                  -- 默认源语言
+    target_lang = "zh",                    -- 默认目标语言
+    bilingual = false,                     -- 逐句对照显示
+    engines = { "google", "youdao" },      -- 默认引擎
+    proxy_url = "",                        -- 例如 "socks5://127.0.0.1:1080"
+    request_timeout = 15000,               -- 后端请求超时(毫秒);<=0 不限制
+    debug = false,                         -- 写入日志到数据目录
 
-vim.g.translator_tts_engine = "say"      -- "say" | "google"
-vim.g.translator_anki_deck = "翻译"      -- Anki 牌组名
+    llm = {                                -- OpenAI 兼容 LLM 配置(见上)
+        -- name / base_url / api_key / model / prompt / timeout
+        -- fallback = { ... },             -- 降级端点(主端点失败时自动使用)
+        -- server = { ... },               -- 本地服务按需启动 + 空闲回收
+    },
+    baidu = {                              -- 百度开放平台凭证(支持整句翻译)
+        -- appid / key,或 appid_name / key_name(环境变量名)
+    },
+
+    window = {
+        type = "float",                    -- "float" | "preview"
+        max_width = 999,                   -- 最大列数(999 = 不限制)
+        max_height = 999,                  -- 最大行数(999 = 不限制)
+    },
+    cache = {
+        enable = true,                     -- 缓存相同翻译结果
+        ttl = 7 * 24 * 60 * 60,            -- 过期时间(秒);0 = 永不过期
+    },
+    history = { enable = true },           -- 持久化历史
+    spinner = { enable = true },           -- 翻译时在光标处显示旋转提示
+    cancel_key = "<Esc>",                  -- 中断在途翻译请求的按键
+    incremental = true,                    -- 结果到达即增长浮窗
+    tts = { engine = "say" },              -- "say" | "google"
+    anki = { deck = "翻译", port = 8765, model = "translator" },
+})
 ```
+
+用 lazy.nvim 时,把同样的表放进 `opts` 即可(lazy 会自动调用 `setup(opts)`)。
+
+### 缓存
+
+相同请求(文本 + 语言方向 + 引擎 + LLM 模型/prompt)的结果会被缓存复用,
+重复请求完全跳过后端。缓存位于 `stdpath("data")/translator/cache.json`,
+最多 500 条(最旧优先淘汰),`cache.ttl` 秒后过期(默认 7 天)。
+
+**失败/空结果不会被写入缓存**——即使所有引擎都失败(例如断网),后端仍会输出
+合法 JSON 但 `results` 为空,这类结果既不入缓存,读取时发现历史脏条目也会
+当作未命中丢弃并重试。因此断网失败后,联网重试不会拿到上次的空结果。
+
+可用 `--no-cache` 单次绕过缓存,或用 `:TranslateCacheClear` 清空全部缓存。
+缓存 key 包含 LLM 提供商/模型/prompt,切换模型会自动使旧条目失效。
 
 ## 文档
 

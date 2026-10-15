@@ -15,16 +15,9 @@ function M.setup(opts)
 end
 
 ---------------------------------------------------------------------
--- OpenAI-compatible LLM provider presets
+-- OpenAI-compatible LLM provider presets（定义见 config.lua，供 resolve_endpoint 共享）
 ---------------------------------------------------------------------
-local LLM_PRESETS = {
-	deepseek = { base_url = "https://api.deepseek.com", model = "deepseek-chat" },
-	openai = { base_url = "https://api.openai.com/v1", model = "gpt-4o-mini" },
-	ollama = { base_url = "http://127.0.0.1:11434/v1", model = "llama3.1" },
-	qwen = { base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1", model = "qwen-plus" },
-	kimi = { base_url = "https://api.moonshot.cn/v1", model = "moonshot-v1-8k" },
-	doubao = { base_url = "https://ark.cn-beijing.volces.com/api/v3", model = "doubao-pro-32k" },
-}
+local LLM_PRESETS = config.llm_presets
 
 ---------------------------------------------------------------------
 -- Build the env map passed to the backend for the `llm` engine.
@@ -80,13 +73,13 @@ local function resolve_base_url(cfg)
 	return nil
 end
 
-local function build_llm_env()
-	local cfg = config.get().llm
-	if not cfg or type(cfg) ~= "table" then
+--- 解析一个 LLM 端点配置（含 provider/name 预设），返回解析后的字段表。
+--- 缺少 base_url 或 model 时返回 nil。
+local function resolve_endpoint(cfg)
+	if type(cfg) ~= "table" then
 		return nil
 	end
 
-	-- provider 与 name 互为别名
 	local provider = cfg.provider or cfg.name
 	local base_url = resolve_base_url(cfg)
 	local model = resolve_model(cfg)
@@ -101,22 +94,110 @@ local function build_llm_env()
 		return nil
 	end
 
-	local env = {
-		TRANSLATOR_LLM_BASE_URL = base_url,
-		TRANSLATOR_LLM_MODEL = model,
+	return {
+		base_url = base_url,
+		model = model,
+		api_key = resolve_api_key(cfg),
+		prompt = cfg.prompt,
+		timeout = cfg.timeout,
 	}
+end
 
-	local api_key = resolve_api_key(cfg)
-	if api_key ~= "" then
-		env.TRANSLATOR_LLM_API_KEY = api_key
-	end
-	if cfg.prompt and cfg.prompt ~= "" then
-		env.TRANSLATOR_LLM_PROMPT = cfg.prompt
-	end
-	if cfg.timeout then
-		env.TRANSLATOR_LLM_TIMEOUT = tostring(cfg.timeout)
+local function build_llm_env()
+	local cfg = config.get().llm
+	if not cfg or type(cfg) ~= "table" then
+		return nil
 	end
 
+	local primary = resolve_endpoint(cfg)
+	if not primary then
+		return nil
+	end
+
+	local env = {
+		TRANSLATOR_LLM_BASE_URL = primary.base_url,
+		TRANSLATOR_LLM_MODEL = primary.model,
+	}
+	if primary.api_key ~= "" then
+		env.TRANSLATOR_LLM_API_KEY = primary.api_key
+	end
+	if primary.prompt and primary.prompt ~= "" then
+		env.TRANSLATOR_LLM_PROMPT = primary.prompt
+	end
+	if primary.timeout then
+		env.TRANSLATOR_LLM_TIMEOUT = tostring(primary.timeout)
+	end
+
+	-- 降级端点（可选）：主端点失败/无结果时由 Rust 后端自动尝试
+	local fallback = resolve_endpoint(cfg.fallback)
+	if fallback then
+		env.TRANSLATOR_LLM_FALLBACK_BASE_URL = fallback.base_url
+		env.TRANSLATOR_LLM_FALLBACK_MODEL = fallback.model
+		if fallback.api_key ~= "" then
+			env.TRANSLATOR_LLM_FALLBACK_API_KEY = fallback.api_key
+		end
+		if fallback.prompt and fallback.prompt ~= "" then
+			env.TRANSLATOR_LLM_FALLBACK_PROMPT = fallback.prompt
+		end
+		if fallback.timeout then
+			env.TRANSLATOR_LLM_FALLBACK_TIMEOUT = tostring(fallback.timeout)
+		end
+	end
+
+	return env
+end
+
+---------------------------------------------------------------------
+-- Build the env map for the `baidu` engine (official API credentials).
+-- Accepts string/function values, an `env` sub-table, or *_name env lookups.
+---------------------------------------------------------------------
+local function resolve_secret(cfg, value_field, name_field, env_field)
+	local v = cfg[value_field]
+	if type(v) == "function" then
+		v = v()
+	end
+
+	if (not v or v == "") and type(cfg.env) == "table" then
+		v = cfg.env[env_field]
+		if type(v) == "function" then
+			v = v()
+		end
+	end
+
+	if (not v or v == "") and cfg[name_field] and cfg[name_field] ~= "" then
+		v = os.getenv(cfg[name_field])
+	end
+
+	return v or ""
+end
+
+local function build_baidu_env()
+	local cfg = config.get().baidu
+	if not cfg or type(cfg) ~= "table" then
+		return nil
+	end
+
+	local appid = resolve_secret(cfg, "appid", "appid_name", "appid")
+	local key = resolve_secret(cfg, "key", "key_name", "key")
+	if appid == "" and key == "" then
+		return nil
+	end
+
+	return { TRANSLATOR_BAIDU_APPID = appid, TRANSLATOR_BAIDU_KEY = key }
+end
+
+--- Merge all engine-specific env vars (LLM + Baidu) into one map.
+local function build_backend_env()
+	local env = build_llm_env() or {}
+	local baidu = build_baidu_env()
+	if baidu then
+		for k, v in pairs(baidu) do
+			env[k] = v
+		end
+	end
+	if next(env) == nil then
+		return nil
+	end
 	return env
 end
 
@@ -142,7 +223,7 @@ function M.translate(options, displaymode)
 		return
 	end
 
-	local env = build_llm_env()
+	local env = build_backend_env()
 	local key = cache.key(options, env)
 
 	-- 命中缓存：直接复用，不启动后端进程。
@@ -178,6 +259,13 @@ function M.translate(options, displaymode)
 	logger.log(table.concat(cmd, " "))
 
 	job.jobstart(cmd, displaymode, env, options, key)
+end
+
+---------------------------------------------------------------------
+-- Cancel the in-flight translation request (:TranslateCancel).
+---------------------------------------------------------------------
+function M.cancel()
+	return job.cancel()
 end
 
 ---------------------------------------------------------------------

@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::sync::Arc;
 use std::thread;
 
@@ -41,6 +42,11 @@ struct TranslateArgs {
     /// Optional proxy URL (http://, socks5://, ...)
     #[arg(long)]
     proxy: Option<String>,
+
+    /// Stream one JSON result per engine (NDJSON) as each completes, instead
+    /// of emitting a single combined JSON object at the end.
+    #[arg(long)]
+    stream: bool,
 
     /// Text to translate. Passed as a single argv element, may contain spaces.
     #[arg(value_name = "TEXT", allow_hyphen_values = true)]
@@ -108,6 +114,10 @@ fn run_translate(args: TranslateArgs) {
     let client = Arc::new(build_client(args.proxy.as_deref()));
     let text = args.text.trim().to_string();
 
+    if args.stream {
+        return run_translate_stream(&args, client, text);
+    }
+
     let handles: Vec<_> = args
         .engines
         .iter()
@@ -136,6 +146,47 @@ fn run_translate(args: TranslateArgs) {
     };
 
     println!("{}", serde_json::to_string(&output).unwrap());
+}
+
+/// Streaming mode: print one Translation JSON per line as each engine finishes,
+/// then a final `{"done":true}` sentinel. Order of lines is completion order.
+fn run_translate_stream(args: &TranslateArgs, client: Arc<reqwest::blocking::Client>, text: String) {
+    let (tx, rx) = std::sync::mpsc::channel::<Translation>();
+
+    let mut spawned = 0usize;
+    for engine in &args.engines {
+        let engine = engine.clone();
+        let client = Arc::clone(&client);
+        let sl = args.source_lang.clone();
+        let tl = args.target_lang.clone();
+        let text = text.clone();
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                engines::translate(&client, &engine, &sl, &tl, &text)
+            }))
+            .unwrap_or_else(|_| engines::base(&engine, &sl, &tl, &text));
+            let _ = tx.send(result);
+        });
+        spawned += 1;
+    }
+    drop(tx);
+
+    let stdout = std::io::stdout();
+    let mut lock = stdout.lock();
+    for _ in 0..spawned {
+        match rx.recv() {
+            Ok(t) => {
+                if let Ok(line) = serde_json::to_string(&t) {
+                    let _ = writeln!(lock, "{}", line);
+                    let _ = lock.flush();
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    let _ = writeln!(lock, "{{\"done\":true}}");
+    let _ = lock.flush();
 }
 
 fn main() {

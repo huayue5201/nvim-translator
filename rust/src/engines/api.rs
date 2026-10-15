@@ -1,6 +1,4 @@
-use std::time::Duration;
-
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::base;
 use crate::Translation;
@@ -32,7 +30,7 @@ pub fn translate(
     let (Some(base_url), Some(model)) =
         (env("TRANSLATOR_LLM_BASE_URL"), env("TRANSLATOR_LLM_MODEL"))
     else {
-        res.paraphrase = "[api] missing LLM config (set vim.g.translator_llm)".to_string();
+        res.paraphrase = "[api] missing LLM config (set llm in setup())".to_string();
         return res;
     };
 
@@ -40,41 +38,32 @@ pub fn translate(
     let timeout = env("TRANSLATOR_LLM_TIMEOUT")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(DEFAULT_TIMEOUT_SECS);
+    let prompt = default_prompt(sl, tl);
 
-    let system_prompt = default_prompt(sl, tl);
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-
-    let body = json!({
-        "model": model,
-        "stream": false,
-        "temperature": 0.1,
-        "messages": [
-            { "role": "system", "content": system_prompt },
-            { "role": "user", "content": text },
-        ],
-    });
-
-    let mut req = client
-        .post(&url)
-        .timeout(Duration::from_secs(timeout));
-
-    if !api_key.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", api_key));
+    if let Some(content) = super::llm::call_llm(client, &base_url, &model, &api_key, &prompt, sl, tl, text, timeout)
+    {
+        parse_content(&content, &mut res);
     }
 
-    let Ok(resp) = req.json(&body).send() else {
-        return res;
-    };
-    let Ok(obj) = resp.json::<Value>() else {
-        return res;
-    };
+    // 主端点无有效结果时，尝试降级端点（与 llm 引擎一致）。
+    // api 引擎始终使用自己的专用 prompt，不继承翻译 prompt。
+    if res.paraphrase.is_empty() && res.explains.is_empty() {
+        if let (Some(fb_url), Some(fb_model)) = (
+            env("TRANSLATOR_LLM_FALLBACK_BASE_URL"),
+            env("TRANSLATOR_LLM_FALLBACK_MODEL"),
+        ) {
+            let fb_key = env("TRANSLATOR_LLM_FALLBACK_API_KEY").unwrap_or_default();
+            let fb_timeout = env("TRANSLATOR_LLM_FALLBACK_TIMEOUT")
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(timeout);
+            let fb_prompt = simple_prompt(sl, tl);
+            if let Some(content) = super::llm::call_llm(client, &fb_url, &fb_model, &fb_key, &fb_prompt, sl, tl, text, fb_timeout)
+            {
+                parse_content(&content, &mut res);
+            }
+        }
+    }
 
-    let content = obj
-        .pointer("/choices/0/message/content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    parse_content(content, &mut res);
     res
 }
 
@@ -97,6 +86,25 @@ fn default_prompt(lang: &str, tl: &str) -> String {
          - If the input is NOT a code API (e.g. a plain word or prose), translate \
            it normally instead: put the translation in \"paraphrase\" and use an \
            empty \"explains\" array.",
+        lang = lang,
+        tl = tl
+    )
+}
+
+/// 简化版 prompt：供降级端点（通常是本地小模型）使用。
+/// 本地 7B 模型难以稳定输出上面的 5 段结构化格式，故简化为
+/// 「概述 + 若干要点」，仍要求输出合法 JSON。
+fn simple_prompt(lang: &str, tl: &str) -> String {
+    format!(
+        "You are a programming API documentation engine. The user gives a code symbol \
+         from the \"{lang}\" language/framework.\n\
+         Reply with ONLY a JSON object (no markdown fences, no commentary) in this exact shape:\n\
+         {{\"paraphrase\":\"...\",\"explains\":[\"...\"]}}\n\
+         - \"paraphrase\": a one-sentence summary of what the symbol does, translated into {tl}.\n\
+         - \"explains\": 1 to 3 short strings about the symbol, e.g. its signature, key \
+           parameters, or return value. Keep code verbatim; translate human-language \
+           descriptions into {tl}.\n\
+         If the input is NOT a code API, translate it normally and use an empty \"explains\" array.",
         lang = lang,
         tl = tl
     )

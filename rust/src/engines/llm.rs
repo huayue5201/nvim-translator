@@ -21,6 +21,9 @@ fn env(name: &str) -> Option<String> {
 ///   TRANSLATOR_LLM_API_KEY   (optional; omitted for local endpoints like ollama)
 ///   TRANSLATOR_LLM_PROMPT    (optional; supports {sl} and {tl} placeholders)
 ///   TRANSLATOR_LLM_TIMEOUT   (optional; seconds, default 60)
+///
+/// 降级端点（可选）：主端点失败或无有效结果时自动尝试
+///   TRANSLATOR_LLM_FALLBACK_BASE_URL / _MODEL / _API_KEY / _PROMPT / _TIMEOUT
 pub fn translate(
     client: &reqwest::blocking::Client,
     sl: &str,
@@ -40,12 +43,48 @@ pub fn translate(
     let timeout = env("TRANSLATOR_LLM_TIMEOUT")
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(DEFAULT_TIMEOUT_SECS);
+    let prompt = env("TRANSLATOR_LLM_PROMPT").unwrap_or_else(|| default_prompt(sl, tl));
 
-    let system_prompt = match env("TRANSLATOR_LLM_PROMPT") {
-        Some(p) => p.replace("{sl}", sl).replace("{tl}", tl),
-        None => default_prompt(sl, tl),
-    };
+    if let Some(content) = call_llm(client, &base_url, &model, &api_key, &prompt, sl, tl, text, timeout) {
+        parse_content(&content, &mut res);
+    }
 
+    // 主端点无有效结果时，尝试降级端点。
+    if res.paraphrase.is_empty() && res.explains.is_empty() {
+        if let (Some(fb_url), Some(fb_model)) = (
+            env("TRANSLATOR_LLM_FALLBACK_BASE_URL"),
+            env("TRANSLATOR_LLM_FALLBACK_MODEL"),
+        ) {
+            let fb_key = env("TRANSLATOR_LLM_FALLBACK_API_KEY").unwrap_or_default();
+            let fb_timeout = env("TRANSLATOR_LLM_FALLBACK_TIMEOUT")
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(timeout);
+            let fb_prompt = env("TRANSLATOR_LLM_FALLBACK_PROMPT").unwrap_or_else(|| prompt.clone());
+            if let Some(content) = call_llm(client, &fb_url, &fb_model, &fb_key, &fb_prompt, sl, tl, text, fb_timeout)
+            {
+                parse_content(&content, &mut res);
+            }
+        }
+    }
+
+    res
+}
+
+/// 调用一个 OpenAI 兼容端点的 chat/completions，返回 assistant 消息内容。
+/// 网络错误 / 非 2xx / 响应缺失 content 时返回 None。
+/// 供 llm 与 api 引擎共用。
+pub fn call_llm(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    model: &str,
+    api_key: &str,
+    prompt: &str,
+    sl: &str,
+    tl: &str,
+    text: &str,
+    timeout: u64,
+) -> Option<String> {
+    let system_prompt = prompt.replace("{sl}", sl).replace("{tl}", tl);
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
     let body = json!({
@@ -58,28 +97,16 @@ pub fn translate(
         ],
     });
 
-    let mut req = client
-        .post(&url)
-        .timeout(Duration::from_secs(timeout));
-
+    let mut req = client.post(&url).timeout(Duration::from_secs(timeout));
     if !api_key.is_empty() {
         req = req.header("Authorization", format!("Bearer {}", api_key));
     }
 
-    let Ok(resp) = req.json(&body).send() else {
-        return res;
-    };
-    let Ok(obj) = resp.json::<Value>() else {
-        return res;
-    };
-
-    let content = obj
-        .pointer("/choices/0/message/content")
+    let resp = req.json(&body).send().ok()?;
+    let obj = resp.json::<Value>().ok()?;
+    obj.pointer("/choices/0/message/content")
         .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    parse_content(content, &mut res);
-    res
+        .map(|s| s.to_string())
 }
 
 fn default_prompt(sl: &str, tl: &str) -> String {

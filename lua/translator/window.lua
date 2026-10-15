@@ -48,30 +48,41 @@ local function compute_size(lines)
 end
 
 ---------------------------------------------------------------------
--- Position the window above or below the cursor.
+-- Position the window above or below the cursor. The chosen side is
+-- remembered so that incremental growth does not flip it (no jump).
 ---------------------------------------------------------------------
-local function compute_position(height)
+local last_above = nil
+
+local function compute_position(height, force_above)
 	local win_height = vim.api.nvim_win_get_height(0)
 	local cursor_row = vim.fn.winline()
 
 	local win_bottom = win_height - cursor_row
 
-	local show_above = win_bottom < height + 3
-
-	if show_above then
-		return -height - 2
+	local above
+	if force_above ~= nil then
+		above = force_above
 	else
-		return 1
+		above = win_bottom < height + 3
+	end
+
+	if above then
+		return -height - 2, true
+	else
+		return 1, false
 	end
 end
 
 function M.open(lines)
 	local width, height = compute_size(lines)
 
+	local row, above = compute_position(height)
+	last_above = above
+
 	local cfg = {
 		width = width,
 		height = height,
-		row = compute_position(height),
+		row = row,
 		col = 0,
 	}
 
@@ -99,6 +110,48 @@ function M.open_interactive(lines)
 	}
 
 	require("translator.window.float").create_interactive(lines, cfg)
+end
+
+---------------------------------------------------------------------
+-- In-place update of an already-open window (incremental streaming).
+-- `center` = true for the fixed, centered interactive window.
+---------------------------------------------------------------------
+function M.update(lines, center)
+	local width, height = compute_size(lines)
+
+	if get_wintype() ~= "float" then
+		-- preview does not support in-place update; fall back to a fresh open
+		M.open(lines)
+		return false
+	end
+
+	local cfg
+	if center then
+		cfg = {
+			width = width,
+			height = height,
+			row = math.max(0, math.floor((vim.o.lines - height) / 2)),
+			col = math.max(0, math.floor((vim.o.columns - width) / 2)),
+		}
+	else
+		local row = compute_position(height, last_above)
+		cfg = {
+			width = width,
+			height = height,
+			row = row,
+			col = 0,
+		}
+	end
+
+	return require("translator.window.float").update(lines, cfg)
+end
+
+--- Close whichever translation window is currently open.
+function M.close()
+	require("translator.window.float").close()
+	pcall(function()
+		require("translator.window.preview").close()
+	end)
 end
 
 return M

@@ -5,28 +5,116 @@ use serde_json::Value;
 use super::base;
 use crate::Translation;
 
-pub fn translate(client: &reqwest::blocking::Client, text: &str) -> Translation {
-    let mut res = base("baidu", "", "", text);
+const SUG_URL: &str = "https://fanyi.baidu.com/sug";
+const API_URL: &str = "https://fanyi-api.baidu.com/api/trans/vip/translate";
 
-    let mut form = HashMap::new();
-    form.insert("kw", text);
+/// Translate with Baidu.
+///
+/// When `TRANSLATOR_BAIDU_APPID` + `TRANSLATOR_BAIDU_KEY` are set (official
+/// Translation API), full sentences are supported. Without credentials we fall
+/// back to the free `/sug` dictionary endpoint, which is word-only.
+pub fn translate(
+    client: &reqwest::blocking::Client,
+    sl: &str,
+    tl: &str,
+    text: &str,
+) -> Translation {
+    let res = base("baidu", sl, tl, text);
 
-    let Ok(resp) = client
-        .post("https://fanyi.baidu.com/sug")
-        .form(&form)
-        .send()
-    else {
+    let appid = std::env::var("TRANSLATOR_BAIDU_APPID").unwrap_or_default();
+    let key = std::env::var("TRANSLATOR_BAIDU_KEY").unwrap_or_default();
+
+    if !appid.is_empty() && !key.is_empty() {
+        return translate_official(client, sl, tl, text, &appid, &key, res);
+    }
+
+    translate_sug(client, text, res)
+}
+
+/// Official API: https://fanyi-api.baidu.com/api/trans/vip/translate
+/// sign = md5(appid + q + salt + key)
+fn translate_official(
+    client: &reqwest::blocking::Client,
+    sl: &str,
+    tl: &str,
+    text: &str,
+    appid: &str,
+    key: &str,
+    mut res: Translation,
+) -> Translation {
+    let salt = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().to_string())
+        .unwrap_or_else(|_| "1".to_string());
+    let sign = format!(
+        "{:x}",
+        md5::compute(format!("{}{}{}{}", appid, text, salt, key))
+    );
+
+    let from = if sl.is_empty() { "auto" } else { sl };
+    let to = if tl.is_empty() { "zh" } else { tl };
+
+    let form = [
+        ("q", text),
+        ("from", from),
+        ("to", to),
+        ("appid", appid),
+        ("salt", salt.as_str()),
+        ("sign", sign.as_str()),
+    ];
+
+    let Ok(resp) = client.post(API_URL).form(&form).send() else {
         return res;
     };
     let Ok(obj) = resp.json::<Value>() else {
         return res;
     };
 
-    parse(obj, &mut res);
+    parse_official(obj, &mut res);
     res
 }
 
-fn parse(obj: Value, res: &mut Translation) {
+fn parse_official(obj: Value, res: &mut Translation) {
+    if let Some(err) = obj.get("error_code").and_then(|v| v.as_str()) {
+        let msg = obj
+            .get("error_msg")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        eprintln!("baidu api error {}: {}", err, msg);
+        return;
+    }
+
+    if let Some(items) = obj.get("trans_result").and_then(|v| v.as_array()) {
+        let parts: Vec<&str> = items
+            .iter()
+            .filter_map(|it| it.get("dst").and_then(|v| v.as_str()))
+            .filter(|s| !s.is_empty())
+            .collect();
+        res.paraphrase = parts.join("\n");
+    }
+}
+
+/// Free dictionary endpoint (word-only fallback).
+fn translate_sug(
+    client: &reqwest::blocking::Client,
+    text: &str,
+    mut res: Translation,
+) -> Translation {
+    let mut form = HashMap::new();
+    form.insert("kw", text);
+
+    let Ok(resp) = client.post(SUG_URL).form(&form).send() else {
+        return res;
+    };
+    let Ok(obj) = resp.json::<Value>() else {
+        return res;
+    };
+
+    parse_sug(obj, &mut res);
+    res
+}
+
+fn parse_sug(obj: Value, res: &mut Translation) {
     if let Some(data) = obj.get("data").and_then(|v| v.as_array()) {
         res.explains = data
             .iter()
@@ -42,14 +130,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_baidu_response() {
+    fn parses_baidu_sug_response() {
         let json = serde_json::json!({
             "data": [{"k": "hello", "v": "int. 你好"}, {"k": "hello", "v": "n. 问候"}]
         });
 
         let mut res = base("baidu", "", "", "hello");
-        parse(json, &mut res);
+        parse_sug(json, &mut res);
 
         assert_eq!(res.explains, vec!["int. 你好", "n. 问候"]);
+    }
+
+    #[test]
+    fn parses_baidu_official_response() {
+        let json = serde_json::json!({
+            "from": "en",
+            "to": "zh",
+            "trans_result": [
+                {"src": "how are you", "dst": "你好吗"},
+                {"src": "today", "dst": "今天"}
+            ]
+        });
+
+        let mut res = base("baidu", "en", "zh", "how are you today");
+        parse_official(json, &mut res);
+
+        assert_eq!(res.paraphrase, "你好吗\n今天");
+    }
+
+    #[test]
+    fn official_error_leaves_result_empty() {
+        let json = serde_json::json!({
+            "error_code": "54001",
+            "error_msg": "Invalid Sign"
+        });
+
+        let mut res = base("baidu", "en", "zh", "hello");
+        parse_official(json, &mut res);
+
+        assert!(res.paraphrase.is_empty());
     }
 }

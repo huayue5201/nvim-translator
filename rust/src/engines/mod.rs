@@ -36,7 +36,7 @@ pub fn translate(
         "api" => api::translate(client, sl, tl, text),
         "google" => google::translate(client, sl, tl, text),
         "youdao" => youdao::translate(client, sl, tl, text),
-        "baidu" => baidu::translate(client, text),
+        "baidu" => baidu::translate(client, sl, tl, text),
         "bing" => bing::translate(client, sl, tl, text),
         "baicizhan" => baicizhan::translate(client, text),
         "haici" => haici::translate(client, text),

@@ -25,6 +25,8 @@ end
 
 -- Forward declaration: secondary actions install_maps/add_anki refer to it.
 local close
+-- Esc handler: cancel an in-flight (streaming) request, else just close.
+local esc_close
 
 ---------------------------------------------------------------------
 -- Secondary actions (operate on the last translation)
@@ -115,11 +117,11 @@ local function install_maps()
 		{ "n", "S", speak_target },
 		{ "n", "a", add_anki },
 		{ "n", "y", copy_paraphrase },
-		{ "n", "<Esc>", close },
+		{ "n", "<Esc>", esc_close },
 		-- 可视模式翻译后浮窗弹出，光标仍处可视模式；让 <Esc> 优先关闭浮窗
 		-- 而不是先退出选择，避免用户需要按两下 Esc。
 		-- 注：'v' 模式映射覆盖 v / V / Ctrl-V 全部可视模式，无需单独注册 'x'。
-		{ "v", "<Esc>", close },
+		{ "v", "<Esc>", esc_close },
 	}
 	for _, m in ipairs(maps) do
 		saved_maps[m[1] .. ":" .. m[2]] = find_global_map(m[1], m[2])
@@ -151,9 +153,23 @@ close = function()
 		pcall(vim.api.nvim_win_close, state_win.win, true)
 	end
 	state_win.win = nil
+	state_win.buf = nil
+	state_win.relative = nil
 	clear_maps()
 	pcall(vim.api.nvim_del_augroup_by_name, state_win.aug)
 	state_win.aug = "translator_float_close"
+end
+
+-- During an in-flight (streaming) request Esc aborts it; otherwise it just
+-- closes the peek window. Honours cancel_key = false as "no cancellation".
+esc_close = function()
+	local cfg = require("translator.config").get()
+	local disabled = cfg.cancel_key == false or cfg.cancel_key == ""
+	if not disabled and vim.g.translator_status == "translating" then
+		require("translator.job").cancel()
+	else
+		close()
+	end
 end
 
 ---------------------------------------------------------------------
@@ -172,6 +188,8 @@ local function build(lines, cfg, enter, win_cfg)
 	require("translator.highlight").apply(bufnr)
 
 	-- 单层浮窗，使用 double border
+	state_win.buf = bufnr
+	state_win.relative = win_cfg.relative
 	state_win.win = vim.api.nvim_open_win(
 		bufnr,
 		enter,
@@ -209,6 +227,41 @@ function M.scroll(forward, amount)
 		end
 	end)
 	return "<Ignore>"
+end
+
+---------------------------------------------------------------------
+-- In-place update: replace buffer contents and resize/reposition the
+-- existing window without tearing it down (avoids flicker on streaming).
+---------------------------------------------------------------------
+---@param lines string[]
+---@param cfg { width: integer, height: integer, row: integer, col: integer }
+---@return boolean updated
+function M.update(lines, cfg)
+	if not win_valid(state_win.win) then
+		return false
+	end
+	local bufnr = state_win.buf
+	if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+		return false
+	end
+
+	lines = util.fit_lines(lines, cfg.width)
+
+	vim.api.nvim_set_option_value("modifiable", true, { buf = bufnr })
+	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+	vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
+
+	require("translator.highlight").apply(bufnr)
+
+	vim.api.nvim_win_set_config(state_win.win, {
+		relative = state_win.relative or "cursor",
+		width = cfg.width,
+		height = cfg.height,
+		row = cfg.row,
+		col = cfg.col,
+	})
+
+	return true
 end
 
 ---------------------------------------------------------------------

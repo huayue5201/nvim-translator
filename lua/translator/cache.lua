@@ -97,19 +97,50 @@ function M.key(options, env)
 	return hash(table.concat(parts, "\1"))
 end
 
---- 读取缓存（缺失 / 过期 / 已禁用 → nil）
+--- 判断翻译结果是否包含有效内容（至少一个引擎返回了译文/释义/音标）。
+--- 后端即使所有引擎都失败也会输出合法 JSON（空 results），这类结果不能
+--- 作为有效缓存命中，否则断网失败后重试会一直拿到上次的空结果。
+---@param translations table
+---@return boolean
+function M.has_content(translations)
+	if type(translations) ~= "table" then
+		return false
+	end
+	local results = translations.results
+	if type(results) ~= "table" then
+		return false
+	end
+	for _, t in ipairs(results) do
+		if type(t) == "table" then
+			if (type(t.paraphrase) == "string" and t.paraphrase ~= "")
+				or (type(t.explains) == "table" and #t.explains > 0)
+				or (type(t.phonetic) == "string" and t.phonetic ~= "") then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--- 读取缓存（缺失 / 过期 / 已禁用 / 无有效内容 → nil）
 ---@param key string
 ---@return table|nil
 function M.get(key)
 	if not enabled() or not key then
 		return nil
 	end
-	local entry = load()[key]
+	local s = load()
+	local entry = s[key]
 	if type(entry) ~= "table" then
 		return nil
 	end
 	local t = ttl()
 	if t > 0 and (os.time() - (entry.t or 0)) > t then
+		return nil
+	end
+	if not M.has_content(entry.v) then
+		s[key] = nil
+		save()
 		return nil
 	end
 	return entry.v

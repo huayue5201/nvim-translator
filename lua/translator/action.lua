@@ -84,9 +84,10 @@ local function build_window_content(trans, options)
 	for _, t in ipairs(trans.results) do
 		local has_content = (t.paraphrase and t.paraphrase ~= "") or (t.explains and #t.explains > 0)
 
+		table.insert(out, "")
+		table.insert(out, "─── " .. t.engine .. " ───")
+
 		if has_content then
-			table.insert(out, "")
-			table.insert(out, "─── " .. t.engine .. " ───")
 
 			if t.phonetic and t.phonetic ~= "" then
 				table.insert(out, MARK .. "[" .. t.phonetic .. "]")
@@ -130,7 +131,18 @@ local function build_window_content(trans, options)
 			for _, trimmed in ipairs(explains_out) do
 				table.insert(out, MARK .. trimmed)
 			end
+		elseif t.pending then
+			table.insert(out, MARK .. "翻译中…")
+		else
+			table.insert(out, MARK .. "无结果")
 		end
+	end
+
+	-- 增量模式：还有引擎未返回时，在末尾追加一行进度提示。
+	-- 随着结果逐个到达，该行数字递减，全部返回后消失。
+	if trans.pending_count and trans.pending_count > 0 then
+		table.insert(out, "")
+		table.insert(out, "⏳ 还有 " .. trans.pending_count .. " 个翻译中…")
 	end
 
 	return out
@@ -143,6 +155,24 @@ function M.window(trans, options)
 	local content = build_window_content(trans, options)
 	logger.log(content)
 	window.open(content)
+end
+
+---------------------------------------------------------------------
+-- Incremental (streaming) display: open a skeleton immediately, then update
+-- each engine slot in place as its result arrives.
+---------------------------------------------------------------------
+function M.stream_begin(trans, options, displaymode)
+	local content = build_window_content(trans, options)
+	if displaymode == "interactive" then
+		window.open_interactive(content)
+	else
+		window.open(content)
+	end
+end
+
+function M.stream_update(trans, options, displaymode)
+	local content = build_window_content(trans, options)
+	window.update(content, displaymode == "interactive")
 end
 
 ---------------------------------------------------------------------

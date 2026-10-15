@@ -111,6 +111,8 @@ function M.apply(bufnr)
 	end
 
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	-- Drop previous extmarks so in-place updates don't accumulate stale highlights.
+	vim.api.nvim_buf_clear_namespace(bufnr, NS, 0, -1)
 	for i, line in ipairs(lines) do
 		local row = i - 1
 
