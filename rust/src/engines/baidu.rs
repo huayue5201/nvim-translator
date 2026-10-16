@@ -28,7 +28,17 @@ pub fn translate(
         return translate_official(client, sl, tl, text, &appid, &key, res);
     }
 
-    translate_sug(client, text, res)
+    let mut res = translate_sug(client, text, res);
+    if res.explains.is_empty() && res.paraphrase.is_empty() && res.error.is_none() {
+        // The free /sug endpoint is word-only; full sentences always come back
+        // empty here, so point at the real fix (official API credentials).
+        res.error = if text.split_whitespace().count() > 1 {
+            Some("no API credentials: /sug is word-only (set BAIDU_APPID/BAIDU_KEY for sentences)".to_string())
+        } else {
+            Some("no result from /sug".to_string())
+        };
+    }
+    res
 }
 
 /// Official API: https://fanyi-api.baidu.com/api/trans/vip/translate
@@ -63,14 +73,26 @@ fn translate_official(
         ("sign", sign.as_str()),
     ];
 
-    let Ok(resp) = client.post(API_URL).form(&form).send() else {
-        return res;
+    let resp = match client.post(API_URL).form(&form).send() {
+        Ok(r) => r,
+        Err(e) => {
+            res.error = Some(format!("request failed: {}", e));
+            return res;
+        }
     };
-    let Ok(obj) = resp.json::<Value>() else {
-        return res;
+    let status = resp.status();
+    let obj = match resp.json::<Value>() {
+        Ok(o) => o,
+        Err(e) => {
+            res.error = Some(format!("HTTP {}: {}", status.as_u16(), e));
+            return res;
+        }
     };
 
     parse_official(obj, &mut res);
+    if res.paraphrase.is_empty() && res.error.is_none() {
+        res.error = Some("official API returned no translation".to_string());
+    }
     res
 }
 
@@ -80,7 +102,7 @@ fn parse_official(obj: Value, res: &mut Translation) {
             .get("error_msg")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        eprintln!("baidu api error {}: {}", err, msg);
+        res.error = Some(format!("baidu api error {}: {}", err, msg));
         return;
     }
 
@@ -103,11 +125,20 @@ fn translate_sug(
     let mut form = HashMap::new();
     form.insert("kw", text);
 
-    let Ok(resp) = client.post(SUG_URL).form(&form).send() else {
-        return res;
+    let resp = match client.post(SUG_URL).form(&form).send() {
+        Ok(r) => r,
+        Err(e) => {
+            res.error = Some(format!("request failed: {}", e));
+            return res;
+        }
     };
-    let Ok(obj) = resp.json::<Value>() else {
-        return res;
+    let status = resp.status();
+    let obj = match resp.json::<Value>() {
+        Ok(o) => o,
+        Err(e) => {
+            res.error = Some(format!("HTTP {}: {}", status.as_u16(), e));
+            return res;
+        }
     };
 
     parse_sug(obj, &mut res);
@@ -169,5 +200,6 @@ mod tests {
         parse_official(json, &mut res);
 
         assert!(res.paraphrase.is_empty());
+        assert!(res.error.unwrap().contains("54001"));
     }
 }

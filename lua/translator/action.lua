@@ -133,6 +133,11 @@ local function build_window_content(trans, options)
 			end
 		elseif t.pending then
 			table.insert(out, MARK .. "翻译中…")
+		elseif t.error and t.error ~= "" then
+			-- 后端给出了具体失败原因（超时 / HTTP 401 / 网络错误…），直接展示。
+			for line in tostring(t.error):gmatch("[^\r\n]+") do
+				table.insert(out, MARK .. util.safe_trim(line))
+			end
 		else
 			table.insert(out, MARK .. "无结果")
 		end

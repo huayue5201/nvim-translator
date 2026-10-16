@@ -19,18 +19,46 @@ pub fn translate(
         encode(text)
     );
 
-    let Ok(resp) = client.get(&url).send() else {
-        return res;
+    let resp = match client.get(&url).send() {
+        Ok(r) => r,
+        Err(e) => {
+            res.error = Some(format!("request failed: {}", e));
+            return res;
+        }
     };
-    let Ok(body) = resp.text() else {
-        return res;
+    let status = resp.status();
+    let body = match resp.text() {
+        Ok(b) => b,
+        Err(e) => {
+            res.error = Some(format!("failed to read response: {}", e));
+            return res;
+        }
     };
-    let Ok(obj) = serde_json::from_str::<Value>(&body) else {
-        return res;
+    let obj = match serde_json::from_str::<Value>(&body) {
+        Ok(o) => o,
+        Err(_) => {
+            res.error = Some(format!("HTTP {}: {}", status.as_u16(), short(&body)));
+            return res;
+        }
     };
 
     parse(obj, &mut res);
+    if res.paraphrase.is_empty() && res.explains.is_empty() && res.phonetic.is_empty() {
+        res.error = Some(format!("empty response (HTTP {})", status.as_u16()));
+    }
     res
+}
+
+/// Shorten a response body for error messages.
+fn short(s: &str) -> String {
+    let t = s.trim();
+    if t.chars().count() <= 160 {
+        t.to_string()
+    } else {
+        let mut out: String = t.chars().take(160).collect();
+        out.push('…');
+        out
+    }
 }
 
 /// Mirror of Python's `v[0]`: first element for arrays, whole value for strings.

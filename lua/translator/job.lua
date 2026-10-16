@@ -216,19 +216,38 @@ end
 ---------------------------------------------------------------------
 -- Result handling (buffered mode)
 ---------------------------------------------------------------------
+-- 所有引擎都没内容时，把每个引擎的失败原因拼成一行，避免只显示
+-- 笼统的 “Translation failed”。后端为每个失败引擎带 `error` 字段。
+local function failure_summary(translations)
+	local parts = {}
+	for _, t in ipairs((translations and translations.results) or {}) do
+		if type(t) == "table" then
+			local reason = t.error
+			if type(reason) ~= "string" or reason == "" then
+				reason = "no result"
+			end
+			parts[#parts + 1] = tostring(t.engine or "?") .. ": " .. reason
+		end
+	end
+	if #parts == 0 then
+		return "no engine returned a result"
+	end
+	return table.concat(parts, " | ")
+end
+
 local function handle_stdout(displaymode, options, key, message)
 	logger.log(message)
 
 	local ok, translations = pcall(vim.json.decode, message)
 	if not ok or not translations then
-		util.show_msg("Translation failed", "error")
+		util.show_msg("Translation failed: invalid response from backend", "error")
 		return
 	end
 
 	-- 所有引擎都失败时后端仍会输出合法 JSON（空 results），这类结果
 	-- 不能写入缓存，否则之后重试会一直命中这个空结果。
 	if not cache.has_content(translations) then
-		util.show_msg("Translation failed", "error")
+		util.show_msg("Translation failed — " .. failure_summary(translations), "error")
 		return
 	end
 
@@ -382,7 +401,7 @@ function M.jobstart(cmd, displaymode, env, options, key)
 				cache.set(key, trans)
 				commit_result(trans, options)
 			else
-				util.show_msg("Translation failed", "error")
+				util.show_msg("Translation failed — " .. failure_summary(trans), "error")
 			end
 			return
 		end

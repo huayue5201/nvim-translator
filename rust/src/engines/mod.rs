@@ -32,7 +32,7 @@ pub fn translate(
     tl: &str,
     text: &str,
 ) -> Translation {
-    match engine {
+    let mut res = match engine {
         "api" => api::translate(client, sl, tl, text),
         "google" => google::translate(client, sl, tl, text),
         "youdao" => youdao::translate(client, sl, tl, text),
@@ -44,6 +44,22 @@ pub fn translate(
         "llm" => llm::translate(client, sl, tl, text),
         "trans" => trans::translate(tl, text),
         "sdcv" => sdcv::translate(text),
-        _ => base(engine, sl, tl, text),
+        _ => {
+            let mut b = base(engine, sl, tl, text);
+            b.error = Some(format!("unknown engine '{}'", engine));
+            b
+        }
+    };
+
+    // Any engine that produced neither content nor a specific reason gets a
+    // generic one, so the frontend never has to show a bare "no result".
+    if res.error.is_none()
+        && res.paraphrase.is_empty()
+        && res.explains.is_empty()
+        && res.phonetic.is_empty()
+    {
+        res.error = Some("engine returned no result".to_string());
     }
+
+    res
 }

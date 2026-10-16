@@ -35,7 +35,7 @@ pub fn translate(
     let (Some(base_url), Some(model)) =
         (env("TRANSLATOR_LLM_BASE_URL"), env("TRANSLATOR_LLM_MODEL"))
     else {
-        res.paraphrase = "[llm] missing base_url/model config".to_string();
+        res.error = Some("[llm] missing base_url/model config".to_string());
         return res;
     };
 
@@ -45,8 +45,11 @@ pub fn translate(
         .unwrap_or(DEFAULT_TIMEOUT_SECS);
     let prompt = env("TRANSLATOR_LLM_PROMPT").unwrap_or_else(|| default_prompt(sl, tl));
 
-    if let Some(content) = call_llm(client, &base_url, &model, &api_key, &prompt, sl, tl, text, timeout) {
-        parse_content(&content, &mut res);
+    let mut reasons: Vec<String> = Vec::new();
+
+    match call_llm(client, &base_url, &model, &api_key, &prompt, sl, tl, text, timeout) {
+        Ok(content) => parse_content(&content, &mut res),
+        Err(e) => reasons.push(format!("primary: {}", e)),
     }
 
     // 主端点无有效结果时，尝试降级端点。
@@ -60,14 +63,30 @@ pub fn translate(
                 .and_then(|v| v.parse::<u64>().ok())
                 .unwrap_or(timeout);
             let fb_prompt = env("TRANSLATOR_LLM_FALLBACK_PROMPT").unwrap_or_else(|| prompt.clone());
-            if let Some(content) = call_llm(client, &fb_url, &fb_model, &fb_key, &fb_prompt, sl, tl, text, fb_timeout)
-            {
-                parse_content(&content, &mut res);
+            match call_llm(client, &fb_url, &fb_model, &fb_key, &fb_prompt, sl, tl, text, fb_timeout) {
+                Ok(content) => parse_content(&content, &mut res),
+                Err(e) => reasons.push(format!("fallback: {}", e)),
             }
         }
     }
 
+    if res.paraphrase.is_empty() && res.explains.is_empty() && res.phonetic.is_empty() && !reasons.is_empty() {
+        res.error = Some(reasons.join("; "));
+    }
+
     res
+}
+
+/// Shorten a response body for error messages.
+fn truncate_body(s: &str) -> String {
+    let t = s.trim();
+    if t.chars().count() <= 160 {
+        t.to_string()
+    } else {
+        let mut out: String = t.chars().take(160).collect();
+        out.push('…');
+        out
+    }
 }
 
 /// 调用一个 OpenAI 兼容端点的 chat/completions，返回 assistant 消息内容。
@@ -83,7 +102,7 @@ pub fn call_llm(
     tl: &str,
     text: &str,
     timeout: u64,
-) -> Option<String> {
+) -> Result<String, String> {
     let system_prompt = prompt.replace("{sl}", sl).replace("{tl}", tl);
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
@@ -102,11 +121,37 @@ pub fn call_llm(
         req = req.header("Authorization", format!("Bearer {}", api_key));
     }
 
-    let resp = req.json(&body).send().ok()?;
-    let obj = resp.json::<Value>().ok()?;
-    obj.pointer("/choices/0/message/content")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+    let resp = req
+        .json(&body)
+        .send()
+        .map_err(|e| format!("request failed: {}", e))?;
+    let status = resp.status();
+    let body_text = resp
+        .text()
+        .map_err(|e| format!("failed to read response: {}", e))?;
+
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status.as_u16(), truncate_body(&body_text)));
+    }
+
+    let obj: Value = serde_json::from_str(&body_text)
+        .map_err(|_| format!("HTTP {}: {}", status.as_u16(), truncate_body(&body_text)))?;
+
+    if let Some(s) = obj.pointer("/choices/0/message/content").and_then(|v| v.as_str()) {
+        if !s.trim().is_empty() {
+            return Ok(s.to_string());
+        }
+    }
+
+    // Reasoning models (e.g. deepseek-flash) may emit everything in
+    // reasoning_content and leave content empty — report it explicitly.
+    if let Some(r) = obj.pointer("/choices/0/message/reasoning_content").and_then(|v| v.as_str()) {
+        if !r.trim().is_empty() {
+            return Err("model returned only reasoning_content (use a non-reasoning model)".to_string());
+        }
+    }
+
+    Err(format!("HTTP {}: response had no content", status.as_u16()))
 }
 
 fn default_prompt(sl: &str, tl: &str) -> String {

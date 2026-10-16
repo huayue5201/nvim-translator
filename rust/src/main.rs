@@ -78,6 +78,11 @@ pub struct Translation {
     pub phonetic: String,
     pub paraphrase: String,
     pub explains: Vec<String>,
+    /// Failure reason for this engine; omitted when the engine succeeded.
+    /// Lets the frontend show *why* an engine came back empty instead of a
+    /// generic "Translation failed".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Serialize)]

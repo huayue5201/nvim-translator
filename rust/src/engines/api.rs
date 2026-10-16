@@ -30,7 +30,7 @@ pub fn translate(
     let (Some(base_url), Some(model)) =
         (env("TRANSLATOR_LLM_BASE_URL"), env("TRANSLATOR_LLM_MODEL"))
     else {
-        res.paraphrase = "[api] missing LLM config (set llm in setup())".to_string();
+        res.error = Some("[api] missing LLM config (set llm in setup())".to_string());
         return res;
     };
 
@@ -40,9 +40,11 @@ pub fn translate(
         .unwrap_or(DEFAULT_TIMEOUT_SECS);
     let prompt = default_prompt(sl, tl);
 
-    if let Some(content) = super::llm::call_llm(client, &base_url, &model, &api_key, &prompt, sl, tl, text, timeout)
-    {
-        parse_content(&content, &mut res);
+    let mut reasons: Vec<String> = Vec::new();
+
+    match super::llm::call_llm(client, &base_url, &model, &api_key, &prompt, sl, tl, text, timeout) {
+        Ok(content) => parse_content(&content, &mut res),
+        Err(e) => reasons.push(format!("primary: {}", e)),
     }
 
     // 主端点无有效结果时，尝试降级端点（与 llm 引擎一致）。
@@ -57,11 +59,15 @@ pub fn translate(
                 .and_then(|v| v.parse::<u64>().ok())
                 .unwrap_or(timeout);
             let fb_prompt = simple_prompt(sl, tl);
-            if let Some(content) = super::llm::call_llm(client, &fb_url, &fb_model, &fb_key, &fb_prompt, sl, tl, text, fb_timeout)
-            {
-                parse_content(&content, &mut res);
+            match super::llm::call_llm(client, &fb_url, &fb_model, &fb_key, &fb_prompt, sl, tl, text, fb_timeout) {
+                Ok(content) => parse_content(&content, &mut res),
+                Err(e) => reasons.push(format!("fallback: {}", e)),
             }
         }
+    }
+
+    if res.paraphrase.is_empty() && res.explains.is_empty() && res.error.is_none() && !reasons.is_empty() {
+        res.error = Some(reasons.join("; "));
     }
 
     res
