@@ -17,6 +17,8 @@ function M.parse(opts)
 	-------------------------------------------------------------------
 	-- Split arguments: --key=value flags vs. plain text
 	-------------------------------------------------------------------
+	local raw = opts.raw == true
+
 	local args = vim.split(opts.args or "", "%s+", { trimempty = true })
 	local texts = {}
 
@@ -29,6 +31,9 @@ function M.parse(opts)
 				options.bilingual = false
 			elseif arg == "--no-cache" then
 				options.force = true -- 绕过翻译缓存，强制重新请求
+			elseif arg == "--raw" then
+				-- 保留换行：代码片段不能被折叠成一行
+				raw = true
 			end
 		elseif arg:match("^%-%-[^=]+=.+$") then
 			local key, val = arg:match("^%-%-(.-)=(.+)$")
@@ -50,10 +55,14 @@ function M.parse(opts)
 	-- Fall back to visual selection / range / cword when no text given
 	-------------------------------------------------------------------
 	if options.text == "" then
-		options.text = util.get_text_from_context(opts)
+		options.text = opts.text or util.get_text_from_context(opts)
 	end
 
-	options.text = util.text_proc(options.text)
+	if raw then
+		options.text = util.safe_trim(options.text)
+	else
+		options.text = util.text_proc(options.text)
+	end
 	if options.text == "" then
 		return nil
 	end
@@ -126,6 +135,7 @@ function M.complete(arg_lead, cmd_line, cursor_pos)
 
 	local engines = {
 		"api",
+		"explain",
 		"baicizhan",
 		"baidu",
 		"bing",

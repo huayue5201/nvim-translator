@@ -47,6 +47,7 @@ M.llm_presets = {
 ---@field llm table
 ---@field baidu table -- 百度翻译开放平台凭证：{ appid, key }（或 appid_name/key_name 读环境变量）
 ---@field incremental boolean -- 多引擎结果增量显示（结果到达即增长浮窗）
+---@field inline { max_lines: integer, concurrency: integer } -- buffer 内虚拟文本中英对照
 ---@field window translator.WindowConfig
 ---@field cache translator.CacheConfig
 ---@field history { enable: boolean }
@@ -85,6 +86,13 @@ local defaults = {
 	-- 追加一段、窗口增高（到达顺序），末尾进度行显示“还有 N 个翻译中…”。
 	-- 关闭时回退为“全部返回后一次性显示”。
 	incremental = true,
+	-- buffer 内虚拟文本中英对照（:TranslateV）：逐行请求后端并显示在源行下方。
+	-- max_lines 限制整篇翻译的最大行数（超出时请用可视选区）；
+	-- concurrency 为同时运行的后端进程数。
+	inline = {
+		max_lines = 200,
+		concurrency = 4,
+	},
 	window = {
 		type = "float",
 		max_width = 999,

@@ -44,6 +44,9 @@ make build
 | `:TranslateX` | Translate the `*` (system clipboard) register |
 | `:TranslateI` | Prompt for text, then translate it (interactive) |
 | `:TranslateApi` | Translate a code API symbol with its documentation |
+| `:TranslateExplain` | Explain the code around the cursor / selection with the LLM |
+| `:TranslateV` | Toggle in-buffer bilingual virtual lines for the buffer / range |
+| `:TranslateVClear` | Remove every virtual translation |
 | `:TranslateSay` | Speak the source text (`!` = speak the translation) |
 | `:TranslateA` | Add the last translation to Anki (via AnkiConnect) |
 | `:TranslateCancel` | Abort the in-flight translation request |
@@ -126,16 +129,18 @@ below the source:
 ```
 
 Each engine's `paraphrase` is interleaved with the source: one source
-sentence followed by its translation (marked with `↳`):
+sentence followed by its translation. Both sides share the same indent —
+the old `↳` arrow prefix is gone because that glyph renders double-width in
+some fonts and shifted the translation out of alignment:
 
 ```
 ⟦ hello. how are you? ⟧
 
 ─── google ───
   hello.
-  ↳ 你好。
+  你好。
   how are you?
-  ↳ 你好吗？
+  你好吗？
 ```
 
 Dictionary-style explanations (`explains`) and phonetics are unchanged.
@@ -147,6 +152,30 @@ vim.g.translator_bilingual = true
 ```
 
 and override per invocation with `--bilingual` / `--no-bilingual`.
+
+### In-buffer bilingual view (virtual text)
+
+`:TranslateV` skips the floating window and writes the translation directly
+**below each source line** using `virt_lines` virtual text. The buffer is not
+modified, so editing, undo and syntax highlighting stay untouched:
+
+```vim
+:TranslateV            " whole buffer (needs a range above inline.max_lines)
+:'<,'>TranslateV       " visual range
+:TranslateV            " run again = turn it off for this buffer
+:TranslateVClear       " remove virtual translations everywhere
+```
+
+Lines are translated in parallel (`inline.concurrency`, default 4), cache
+hits render instantly, and blank / symbol-only lines are skipped. The
+virtual line keeps the source line's indentation.
+
+```lua
+inline = {
+    max_lines = 200,   -- whole-buffer limit
+    concurrency = 4,   -- backend processes in flight
+},
+```
 
 ### Interactive input
 
@@ -449,6 +478,34 @@ vim.keymap.set("n", "<localLeader>tld", "<Cmd>TranslateApi<CR>", { desc = "API �
 vim.keymap.set("v", "<localLeader>tld", ":TranslateApi<CR>", { desc = "API 文档翻译" })
 ```
 
+## Code explanation
+
+`:TranslateExplain` sends the code around the cursor to the configured LLM and
+shows an explanation, so you do not have to copy the context into a chat window
+by hand.
+
+```vim
+:TranslateExplain                 " enclosing function/block under the cursor
+:'<,'>TranslateExplain            " visual selection (used verbatim)
+```
+
+- In normal mode it prefers the innermost enclosing function (Tree-sitter);
+  otherwise it falls back to the surrounding indentation block, then to a
+  small window around the cursor. Long snippets are capped at 160 lines.
+- The buffer's `filetype` is passed as the programming-language hint, and the
+  explanation is written in `target_lang` (Chinese by default).
+- It reuses the `llm` engine configuration and supports `llm.fallback` with a
+  simplified prompt, exactly like the `api` engine.
+- Bilingual mode is disabled; the output is a one-line summary plus points such
+  as 作用 / 流程 / 关键点 / 注意 / 相关.
+
+Suggested keymap (replacing / next to the API one):
+
+```lua
+vim.keymap.set("n", "<localLeader>td", "<Cmd>TranslateExplain<CR>", { desc = "Explain code" })
+vim.keymap.set("v", "<localLeader>td", ":TranslateExplain<CR>", { desc = "Explain code" })
+```
+
 ## Text-to-speech (朗诵)
 
 Speak the source text or the translation.
@@ -577,6 +634,10 @@ require("translator").setup({
     spinner = { enable = true },           -- cursor spinner while translating
     cancel_key = "<Esc>",                  -- key that aborts an in-flight request
     incremental = true,                    -- grow the window as results arrive
+    inline = {                            -- :TranslateV virtual-text view
+        max_lines = 200,                  -- whole-buffer limit
+        concurrency = 4,                  -- backend processes in flight
+    },
     tts = { engine = "say" },              -- "say" | "google"
     anki = { deck = "翻译", port = 8765, model = "translator" },
 })

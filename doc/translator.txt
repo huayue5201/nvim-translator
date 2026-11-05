@@ -9,8 +9,9 @@ CONTENTS                                                     *translator*
 4. Commands ......................................... |translator-commands|
 5. Engines .......................................... |translator-engines|
 6. API documentation translation ..................... |translator-api|
-7. Configuration .................................... |translator-config|
-8. Development ...................................... |translator-development|
+7. Code explanation ................................. |translator-explain|
+8. Configuration .................................... |translator-config|
+9. Development ...................................... |translator-development|
 
 ==============================================================================
 1. INTRODUCTION                                            *translator-intro*
@@ -88,6 +89,25 @@ Or manually: >
         Translate a code API symbol with its documentation. See
         |translator-api|.
 
+                                                *:TranslateExplain*
+:TranslateExplain [--target_lang=...]
+        Explain the code around the cursor (or the visual selection) with the
+        configured LLM. See |translator-explain|.
+
+                                                    *:TranslateV*
+:TranslateV [--engines=...] [--source_lang=...] [--target_lang=...]
+        Toggle the in-buffer bilingual view: every source line gets its
+        translation rendered as a virtual line below it (extmark
+        `virt_lines`). The buffer is not modified. With a range, only those
+        lines are translated; otherwise the whole buffer is used (limited by
+        `inline.max_lines`). Running it again turns the view off for the
+        current buffer. See |translator-inline|.
+
+                                                    *:TranslateVClear*
+:TranslateVClear
+        Remove every virtual translation (all buffers) and stop in-flight
+        virtual-text jobs.
+
                                                     *:TranslateH*
 :TranslateH
         Open the translation history.
@@ -126,7 +146,23 @@ automatically: >
 <
 Explicit `--source_lang` / `--target_lang` override this. Window modes also
 accept `--bilingual` / `--no-bilingual` to toggle the sentence-by-sentence
-source/translation view (default: `bilingual` in your config).
+source/translation view (default: `bilingual` in your config). Both sides use
+the same indent; no arrow marker is added, since such glyphs may render
+double-width in some fonts and misalign the translation.
+
+IN-BUFFER BILINGUAL VIEW                              *translator-inline*
+
+:TranslateV renders each line's translation as a virtual line below the
+source line, leaving the buffer untouched. Lines are requested in parallel,
+respecting `inline.concurrency` (default 4); cache hits render immediately and
+blank / symbol-only lines are skipped. The virtual line keeps the source
+line's indentation. Related options: >
+    inline = {
+        max_lines = 200,   -- whole-buffer limit
+        concurrency = 4,   -- backend processes in flight
+    },
+<
+Use |:TranslateVClear| to remove all virtual translations at once.
 
 CANCELLING A REQUEST                                   *translator-cancel-key*
 
@@ -294,7 +330,34 @@ Suggested keymaps: >
 <
 
 ==============================================================================
-7. CONFIGURATION                                          *translator-config*
+7. CODE EXPLANATION                                        *translator-explain*
+                                                      *:TranslateExplain*
+`:TranslateExplain` sends the code around the cursor to the configured LLM and
+shows an explanation, so the context does not have to be copied into a chat
+window by hand. With a visual selection the selected lines are sent verbatim.
+
+In normal mode the innermost enclosing function (via Tree-sitter) is used;
+if no parser/node is available it falls back to the surrounding indentation
+block, then to a small window around the cursor. Snippets are capped at 160
+lines. The buffer's |'filetype'| is the programming-language hint and the
+explanation is written in the target language (see |translator-config|).
+
+It reuses the `llm` configuration and honours `llm.fallback` with a simplified
+prompt, exactly like |translator-api|. Bilingual mode is disabled. Output is a
+one-line summary plus points such as 作用 / 流程 / 关键点 / 注意 / 相关.
+
+Examples: >
+    :TranslateExplain                      " enclosing code under the cursor
+    :TranslateExplain --target_lang=en     " explain in English
+    :'<,'>TranslateExplain                 " explain the visual selection
+<
+Suggested keymaps: >
+    vim.keymap.set("n", "<localLeader>td", "<Cmd>TranslateExplain<CR>", { desc = "Explain code" })
+    vim.keymap.set("v", "<localLeader>td", ":TranslateExplain<CR>", { desc = "Explain code" })
+<
+
+==============================================================================
+8. CONFIGURATION                                          *translator-config*
 
                                                           *translator.setup()*
 >
@@ -321,6 +384,10 @@ Suggested keymaps: >
         spinner = { enable = true },          -- cursor spinner
         cancel_key = "<Esc>",                 -- key that aborts an in-flight request
         incremental = true,                   -- grow the window as results arrive
+        inline = {
+            max_lines = 200,                  -- :TranslateV whole-buffer limit
+            concurrency = 4,                  -- backend processes in flight
+        },
         tts = { engine = "say" },             -- "say" | "google"
         anki = { deck = "翻译", port = 8765, model = "translator" },
         highlights = { ... },                 -- override panel highlights
@@ -349,10 +416,11 @@ never serves the previous empty result.
 HIGHLIGHTS ~
 
 The panel uses restrained highlights: the source line and phonetic are dimmed,
-the engine header is accented, the leading markers (`•` / `↳`) are highlighted,
-the translated text inside `⟦ … ⟧` is emphasised, and the translation body stays
-at the default colour. Groups are defined with `default = true`, so a
-colourscheme can override them. To customise: >
+the engine header is accented, the leading `•` marker is highlighted, the
+translated text inside `⟦ … ⟧` is emphasised, and the translation body stays at
+the default colour. The in-buffer virtual translations (|:TranslateV|) use the
+`inline` role. Groups are defined with `default = true`, so a colourscheme can
+override them. To customise: >
 
     require("translator").setup({
         highlights = {
@@ -360,13 +428,14 @@ colourscheme can override them. To customise: >
             source_text = "Identifier",  " the translated object itself
             engine      = "Title",
             phonetic    = "Comment",
-            marker      = "Special",     " • / ↳ line markers
+            marker      = "Special",     " • line marker
+            inline      = "Comment",     " :TranslateV virtual lines
         },
     })
 <
 
 ==============================================================================
-8. DEVELOPMENT                                        *translator-development*
+9. DEVELOPMENT                                         *translator-development*
 
                                                         *translator-make*
 >

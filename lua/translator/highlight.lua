@@ -18,6 +18,7 @@ local DEFAULT_ROLES = {
 	engine = "TranslatorEngine",
 	phonetic = "TranslatorPhonetic",
 	marker = "TranslatorMarker",
+	inline = "TranslatorInline",
 }
 
 -- 基础/角色高亮组（default=true：不覆盖用户或配色方案的定义）
@@ -33,6 +34,8 @@ local BASE_GROUPS = {
 	TranslatorEngine = { link = "Title", default = true },
 	TranslatorPhonetic = { link = "Comment", default = true },
 	TranslatorMarker = { link = "Special", default = true },
+	-- 虚拟文本（buffer 内中英对照）
+	TranslatorInline = { link = "Comment", default = true },
 }
 
 local NS = vim.api.nvim_create_namespace("translator_highlight")
@@ -58,6 +61,13 @@ local function group_for(role)
 	return DEFAULT_ROLES[role]
 end
 
+--- 角色对应的实际高亮组（对外暴露，供虚拟文本等复用）
+---@param role string
+---@return string|nil
+function M.group_for(role)
+	return group_for(role)
+end
+
 --- 按渲染后的行前缀判定角色（前缀是插件自身产出的语义标记）
 ---@param line string
 ---@return string|nil
@@ -74,11 +84,11 @@ function M.role_of(line)
 	return nil
 end
 
---- 行首标记（• / ↳）的字节范围；返回 0-based 起始与独占结束列
+--- 行首标记（•）的字节范围；返回 0-based 起始与独占结束列
 ---@param line string
 ---@return integer|nil, integer|nil
 local function marker_span(line)
-	for _, m in ipairs({ "•", "↳" }) do
+	for _, m in ipairs({ "•" }) do
 		local s, e = line:find(m, 1, true)
 		if s then
 			return s - 1, e
@@ -132,7 +142,7 @@ function M.apply(bufnr)
 			end
 		end
 
-		-- 行首标记（• / ↳）只染标记本身
+		-- 行首标记（•）只染标记本身
 		local mstart, mend = marker_span(line)
 		if mstart then
 			local marker_group = group_for("marker")

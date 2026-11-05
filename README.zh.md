@@ -42,6 +42,9 @@ make build
 | `:TranslateX` | 翻译 `*`(系统剪贴板)寄存器 |
 | `:TranslateI` | 交互式输入文本后翻译 |
 | `:TranslateApi` | 翻译代码 API 符号及其文档 |
+| `:TranslateExplain` | 由 AI 解释光标处 / 选区中的代码 |
+| `:TranslateV` | 在 buffer 内用虚拟文本逐行显示中英对照(整篇 / 选区,再次执行关闭) |
+| `:TranslateVClear` | 清除所有虚拟译文 |
 | `:TranslateSay` | 朗读原文(`!` = 朗读译文) |
 | `:TranslateA` | 把上次翻译加入 Anki(通过 AnkiConnect) |
 | `:TranslateCancel` | 中断正在进行的翻译请求 |
@@ -114,17 +117,18 @@ make build
 :TranslateW --bilingual hello. how are you?
 ```
 
-每个引擎的 `paraphrase` 会与原文逐句交错:一句原文后面紧跟一句译文
-(译文以 `↳` 标记):
+每个引擎的 `paraphrase` 会与原文逐句交错:一句原文后面紧跟一句译文,
+两侧缩进一致(译文不再带 `↳` 之类的箭头前缀,避免该符号在部分字体中
+按双宽渲染导致文字错位):
 
 ```
 ⟦ hello. how are you? ⟧
 
 ─── google ───
   hello.
-  ↳ 你好。
+  你好。
   how are you?
-  ↳ 你好吗？
+  你好吗？
 ```
 
 词典式释义(`explains`)和音标保持不变。
@@ -136,6 +140,29 @@ vim.g.translator_bilingual = true
 ```
 
 也可用 `--bilingual` / `--no-bilingual` 在单次调用中覆盖。
+
+### Buffer 内中英对照(虚拟文本)
+
+`:TranslateV` 不打开浮窗,而是直接把译文献在每个源行**下方**(通过
+`virt_lines` 虚拟文本)。buffer 内容不会被修改,所以编辑、撤销、语法高亮
+都不受影响:
+
+```vim
+:TranslateV            " 当前 buffer(超过 inline.max_lines 时需先用选区)
+:'<,'>TranslateV       " 可视选区
+:TranslateV            " 再次执行 = 关闭当前 buffer 的对照
+:TranslateVClear       " 清除所有 buffer 的虚拟译文
+```
+
+逐行并行请求后端(`inline.concurrency`,默认 4),命中缓存的行即时显示;
+空白行与纯符号行会跳过。译文缩进与源行一致,长行由虚拟文本自行折行。
+
+```lua
+inline = {
+    max_lines = 200,   -- 整篇翻译的最大行数
+    concurrency = 4,   -- 同时运行的后端进程数
+},
+```
 
 ### 交互式输入
 
@@ -420,6 +447,32 @@ vim.keymap.set("n", "<localLeader>tld", "<Cmd>TranslateApi<CR>", { desc = "API �
 vim.keymap.set("v", "<localLeader>tld", ":TranslateApi<CR>", { desc = "API 文档翻译" })
 ```
 
+## 代码解释
+
+`:TranslateExplain` 把光标处的代码直接发给已配置的 LLM 并显示解释,不必再手动
+复制上下文到聊天窗口。
+
+```vim
+:TranslateExplain                 " 解释光标所在函数 / 代码块
+:'<,'>TranslateExplain            " 可视选区(原样发送)
+```
+
+- 普通模式优先用 Tree-sitter 找最内层函数;找不到时按缩进推断代码块,再退化为
+  光标附近的一小段。片段上限 160 行。
+- 用当前缓冲区的 `filetype` 作为编程语言提示,解释语言跟随 `target_lang`
+  (默认中文)。
+- 复用 `llm` 配置,并和 `api` 引擎一样支持 `llm.fallback`(降级端点使用简化
+  prompt)。
+- 自动关闭双语对照;输出为一句话概述,加上 作用 / 流程 / 关键点 / 注意 / 相关
+  等要点。
+
+建议按键(可直接替换或与 API 翻译并存):
+
+```lua
+vim.keymap.set("n", "<localLeader>td", "<Cmd>TranslateExplain<CR>", { desc = "AI 解释代码" })
+vim.keymap.set("v", "<localLeader>td", ":TranslateExplain<CR>", { desc = "AI 解释代码" })
+```
+
 ## 文本转语音(朗诵)
 
 朗读原文或译文。
@@ -543,6 +596,10 @@ require("translator").setup({
     spinner = { enable = true },           -- 翻译时在光标处显示旋转提示
     cancel_key = "<Esc>",                  -- 中断在途翻译请求的按键
     incremental = true,                    -- 结果到达即增长浮窗
+    inline = {                            -- :TranslateV 虚拟文本中英对照
+        max_lines = 200,                  -- 整篇翻译的最大行数
+        concurrency = 4,                  -- 并发后端进程数
+    },
     tts = { engine = "say" },              -- "say" | "google"
     anki = { deck = "翻译", port = 8765, model = "translator" },
 })

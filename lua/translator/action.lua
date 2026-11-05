@@ -9,11 +9,12 @@ local M = {}
 
 local MARK = "• "
 
--- Prefix used for the target-language sentence in bilingual mode.
-local TARGET_MARK = "↳ "
-
 ---------------------------------------------------------------------
 -- Bilingual interleave: alternate source sentence / target sentence.
+-- No marker is added to the target sentence: any extra glyph (e.g. an
+-- arrow) may render double-width in some fonts, which would misalign the
+-- translation with the source line. Both sides rely on fit_lines' uniform
+-- "  " indent instead.
 -- When the two sides have different sentence counts, the longer side's
 -- extra sentences are appended at the end.
 ---------------------------------------------------------------------
@@ -27,7 +28,7 @@ local function append_bilingual(out, source_text, target_text)
 			table.insert(out, src[i])
 		end
 		if dst[i] then
-			table.insert(out, TARGET_MARK .. dst[i])
+			table.insert(out, dst[i])
 		end
 	end
 end
@@ -74,8 +75,8 @@ local function build_window_content(trans, options)
 
 	local bilingual = options and options.bilingual == true
 
-	-- 原文（自动截断）
-	local text = trans.text
+	-- 原文（自动截断；多行代码先把换行折叠成 ↵，避免把换行写进单行 buffer）
+	local text = (trans.text or ""):gsub("[\r\n]+", " ↵ ")
 	if #text > 60 then
 		text = text:sub(1, 60) .. "..."
 	end

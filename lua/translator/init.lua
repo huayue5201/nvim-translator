@@ -201,6 +201,11 @@ local function build_backend_env()
 	return env
 end
 
+--- 供其它模块（如虚拟文本对照）复用同一套后端环境变量。
+function M.backend_env()
+	return build_backend_env()
+end
+
 ---------------------------------------------------------------------
 -- Locate the compiled Rust backend binary
 ---------------------------------------------------------------------
@@ -291,6 +296,44 @@ function M.translate_api(opts)
 		line1 = opts.line1 or 1,
 		line2 = opts.line2 or 1,
 		args = args,
+	})
+end
+
+---------------------------------------------------------------------
+-- Code explanation (:TranslateExplain)
+-- Grabs the code context around the cursor (or the visual selection) and
+-- asks the LLM to explain it, instead of translating it.
+---------------------------------------------------------------------
+function M.explain(opts)
+	opts = opts or {}
+
+	local ct = require("translator.code").context(opts)
+	if not ct or ct == "" then
+		require("translator.util").show_msg("Nothing to explain here", "warn")
+		return
+	end
+
+	-- Programming-language hint, same convention as the `api` engine.
+	local ft = vim.bo.filetype
+	local lang = (ft ~= "" and ft ~= "text" and ft ~= "markdown") and ft or "code"
+	local target = config.get().target_lang or "zh"
+
+	local extra = vim.trim(opts.args or "")
+	local args = "--engines=explain --source_lang=" .. lang
+		.. " --target_lang=" .. target
+		.. " --no-bilingual --raw"
+	if extra ~= "" then
+		args = args .. " " .. extra
+	end
+
+	M.start("window", {
+		bang = false,
+		range = 0,
+		line1 = 1,
+		line2 = 1,
+		args = args,
+		text = ct,
+		raw = true,
 	})
 end
 

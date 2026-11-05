@@ -4,6 +4,7 @@ pub mod api;
 pub mod baicizhan;
 pub mod baidu;
 pub mod bing;
+pub mod explain;
 pub mod google;
 pub mod haici;
 pub mod iciba;
@@ -34,6 +35,7 @@ pub fn translate(
 ) -> Translation {
     let mut res = match engine {
         "api" => api::translate(client, sl, tl, text),
+        "explain" => explain::translate(client, sl, tl, text),
         "google" => google::translate(client, sl, tl, text),
         "youdao" => youdao::translate(client, sl, tl, text),
         "baidu" => baidu::translate(client, sl, tl, text),

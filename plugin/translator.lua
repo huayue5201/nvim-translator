@@ -84,3 +84,20 @@ vim.api.nvim_create_user_command("TranslateApi", function(opts)
 		args = opts.args,
 	})
 end, { nargs = "*", range = true })
+
+vim.api.nvim_create_user_command("TranslateV", function(opts)
+	require("translator.inline").toggle(opts)
+end, { nargs = "*", bang = true, range = true })
+
+vim.api.nvim_create_user_command("TranslateVClear", function()
+	require("translator.inline").clear_all()
+end, {})
+
+vim.api.nvim_create_user_command("TranslateExplain", function(opts)
+	require("translator").explain({
+		range = opts.range,
+		line1 = opts.line1,
+		line2 = opts.line2,
+		args = opts.args,
+	})
+end, { nargs = "*", range = true })

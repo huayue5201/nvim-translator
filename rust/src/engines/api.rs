@@ -117,7 +117,7 @@ fn simple_prompt(lang: &str, tl: &str) -> String {
 }
 
 /// Strip ```json ... ``` fences that many models add despite instructions.
-fn strip_fences(content: &str) -> String {
+pub(crate) fn strip_fences(content: &str) -> String {
     let s = content.trim();
     if s.starts_with("```") {
         let body = s.find('\n').map(|i| &s[i + 1..]).unwrap_or("");
@@ -131,7 +131,7 @@ fn strip_fences(content: &str) -> String {
     }
 }
 
-fn parse_content(content: &str, res: &mut Translation) {
+pub(crate) fn parse_content(content: &str, res: &mut Translation) {
     let text = strip_fences(content);
 
     match serde_json::from_str::<Value>(&text) {
