@@ -96,9 +96,10 @@ Or manually: >
 
                                                     *:TranslateV*
 :TranslateV [--engines=...] [--source_lang=...] [--target_lang=...]
-        Toggle the in-buffer bilingual view: every source line gets its
-        translation rendered as a virtual line below it (extmark
-        `virt_lines`). The buffer is not modified. With a range, only those
+        Toggle the in-buffer bilingual view: the comments and string
+        literals of every line get their translation rendered as a virtual
+        line below it (extmark `virt_lines`). The buffer is not modified.
+        With a range, only those
         lines are translated; otherwise the whole buffer is used (limited by
         `inline.max_lines`). Running it again turns the view off for the
         current buffer. See |translator-inline|.
@@ -156,7 +157,15 @@ IN-BUFFER BILINGUAL VIEW                              *translator-inline*
 source line, leaving the buffer untouched. Lines are requested in parallel,
 respecting `inline.concurrency` (default 4); cache hits render immediately and
 blank / symbol-only lines are skipped. The virtual line keeps the source
-line's indentation. Related options: >
+line's indentation.
+
+Only comments and string literals are translated: the scanner uses the
+buffer's 'commentstring' (with fallbacks for common filetypes), same-line and
+multi-line block comments, and quoted strings with backslash escapes. A line
+containing both a string and a comment yields two virtual lines, in source
+order. Plain-text buffers (`text`, `markdown`, `help`, `rst`, `org`,
+`gitcommit`) have no comment syntax and translate every non-empty line
+instead. Related options: >
     inline = {
         max_lines = 200,   -- whole-buffer limit
         concurrency = 4,   -- backend processes in flight

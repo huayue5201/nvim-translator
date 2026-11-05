@@ -1,7 +1,8 @@
 -- File: lua/translator/inline.lua
--- Virtual-text bilingual mode: each source line gets its translation drawn as
--- a virtual line *below* it (extmark `virt_lines`). The buffer itself is never
--- modified, so editing / undo / syntax stay untouched.
+-- Virtual-text bilingual mode: each comment / string literal gets its
+-- translation drawn as a virtual line *below* its source line (extmark
+-- `virt_lines`). The buffer itself is never modified, so editing / undo /
+-- syntax stay untouched. See lua/translator/targets.lua for the scanner.
 --
 --   :TranslateV          toggle for the whole buffer
 --   :'<,'>TranslateV      toggle for the selected lines
@@ -12,13 +13,15 @@ local cache = require("translator.cache")
 local config = require("translator.config")
 local binary = require("translator.binary")
 local cmdline = require("translator.cmdline")
+local targets = require("translator.targets")
 
 local M = {}
 
 local NS = vim.api.nvim_create_namespace("translator_inline")
 
 --- bufnr -> session { bufnr, bin, env, engines, source_lang, target_lang,
----   proxy, force, queue, running, concurrency, stopped, hl, marks }
+---   proxy, force, queue, running, concurrency, stopped, hl, marks,
+---   results, cfg, state }
 local sessions = {}
 
 local function inline_cfg()
@@ -47,24 +50,62 @@ end
 ---------------------------------------------------------------------
 -- Rendering
 ---------------------------------------------------------------------
-local function render(sess, lnum, translation)
+--- Re-render the virtual lines for one source line from sess.results.
+local function render(sess, lnum)
 	local bufnr = sess.bufnr
 	if sess.stopped or not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
+
+	if sess.marks[lnum] then
+		pcall(vim.api.nvim_buf_del_extmark, bufnr, NS, sess.marks[lnum])
+		sess.marks[lnum] = nil
+	end
+
+	local res = sess.results[lnum]
+	if not res then
+		return
+	end
+
+	local indexes = {}
+	for idx in pairs(res) do
+		indexes[#indexes + 1] = idx
+	end
+	table.sort(indexes)
+	if #indexes == 0 then
+		return
+	end
+
 	local line = vim.api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1] or ""
 
 	-- Keep indentation so the translation lines up under the source line.
 	local indent = line:match("^[ \t]*") or ""
-	local chunks = { { indent .. translation, sess.hl or "TranslatorInline" } }
+	local virt_lines = {}
+	for _, idx in ipairs(indexes) do
+		virt_lines[#virt_lines + 1] = { { indent .. res[idx], sess.hl or "TranslatorInline" } }
+	end
 
 	local ok, mark = pcall(vim.api.nvim_buf_set_extmark, bufnr, NS, lnum - 1, 0, {
-		virt_lines = { chunks },
+		virt_lines = virt_lines,
 		virt_lines_above = false,
 	})
 	if ok then
 		sess.marks[lnum] = mark
 	end
+end
+
+--- Record one translated segment and refresh its line.
+local function store(sess, item, translation)
+	if not translation or translation == "" then
+		return
+	end
+	local src = util.safe_trim(item.text)
+	if src:lower() == translation:lower() then
+		return
+	end
+	sess.results[item.lnum] = sess.results[item.lnum] or {}
+	sess.results[item.lnum][item.idx] = translation
+	render(sess, item.lnum)
 end
 
 ---------------------------------------------------------------------
@@ -116,10 +157,7 @@ function start_next(sess)
 
 		local cached = (not sess.force) and cache.get(key) or nil
 		if cached then
-			local tr = pick_translation(cached)
-			if tr and util.safe_trim(item.text):lower() ~= tr:lower() then
-				render(sess, item.lnum, tr)
-			end
+			store(sess, item, pick_translation(cached))
 		else
 			sess.running = sess.running + 1
 
@@ -167,12 +205,7 @@ function start_next(sess)
 							if tr and cache.has_content(decoded) then
 								cache.set(key, decoded)
 							end
-							if tr then
-								local src = util.safe_trim(item.text)
-								if src:lower() ~= tr:lower() then
-									render(sess, item.lnum, tr)
-								end
-							end
+							store(sess, item, tr)
 						elseif #err > 0 and sess.warned ~= true then
 							sess.warned = true
 							util.show_msg("虚拟翻译失败：" .. util.safe_trim(table.concat(err, " ")), "error")
@@ -298,21 +331,34 @@ function M.translate(opts)
 		running = 0,
 		stopped = false,
 		marks = {},
+		results = {},
+		cfg = targets.cfg(bufnr),
+		state = targets.new_state(),
 		hl = hl_group(),
 	}
 	sessions[bufnr] = sess
 
+	local plain = targets.plain(sess.cfg)
 	for i, line in ipairs(lines) do
-		local trimmed = util.safe_trim(line)
-		-- Skip blanks and lines with no letters / CJK (punctuation, symbols).
-		if trimmed ~= "" and (util.has_cjk(trimmed) or trimmed:match("%a")) then
-			table.insert(sess.queue, { lnum = first + i - 1, text = trimmed })
+		local lnum = first + i - 1
+		if plain then
+			local trimmed = util.safe_trim(line)
+			-- Skip blanks and lines with no letters / CJK (punctuation, symbols).
+			if trimmed ~= "" and (util.has_cjk(trimmed) or trimmed:match("%a")) then
+				table.insert(sess.queue, { lnum = lnum, idx = 1, text = trimmed })
+			end
+		else
+			-- Only comments and string literals; code is left alone.
+			for idx, seg in ipairs(targets.line(line, sess.cfg, sess.state)) do
+				table.insert(sess.queue, { lnum = lnum, idx = idx, text = seg.text, kind = seg.kind })
+			end
 		end
 	end
 
 	if #sess.queue == 0 then
 		sessions[bufnr] = nil
-		util.show_msg("没有可翻译的文本行", "warning")
+		local why = plain and "没有可翻译的文本行" or "未发现可翻译的注释或字符串"
+		util.show_msg(why, "warning")
 		return
 	end
 

@@ -166,6 +166,14 @@ modified, so editing, undo and syntax highlighting stay untouched:
 :TranslateVClear       " remove virtual translations everywhere
 ```
 
+**Only comments and string literals are translated** — code lines are left
+alone. Detection uses the buffer's 'commentstring' (with built-in fallbacks
+for common filetypes), same-line and multi-line block comments, and quoted
+strings with backslash escapes. A line with both a string and a trailing
+comment produces two virtual lines, in source order. Plain-text buffers
+(`text`, `markdown`, `help`, `rst`, `org`, `gitcommit`) have no comment
+syntax and translate every non-empty line instead.
+
 Lines are translated in parallel (`inline.concurrency`, default 4), cache
 hits render instantly, and blank / symbol-only lines are skipped. The
 virtual line keeps the source line's indentation.

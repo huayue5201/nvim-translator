@@ -154,6 +154,12 @@ vim.g.translator_bilingual = true
 :TranslateVClear       " 清除所有 buffer 的虚拟译文
 ```
 
+**只翻译注释和字符串字面量**,代码行不动:识别基于 buffer 的
+`commentstring`(常见文件类型有内置回退)、单行/多行块注释以及带转义的引号
+字符串。同一行既有字符串又有行尾注释时,会按源码顺序生成两条虚拟译文。
+纯文本类 buffer(`text`、`markdown`、`help`、`rst`、`org`、`gitcommit`)
+没有注释语法,改为逐行翻译非空行。
+
 逐行并行请求后端(`inline.concurrency`,默认 4),命中缓存的行即时显示;
 空白行与纯符号行会跳过。译文缩进与源行一致,长行由虚拟文本自行折行。
 
