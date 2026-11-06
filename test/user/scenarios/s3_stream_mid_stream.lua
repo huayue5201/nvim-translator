@@ -6,6 +6,7 @@ local open = H.floats()
 local inflight = vim.g.translator_status
 H.esc()
 H.wait(400)
+H.settle()
 H.report("S3 streaming esc mid-stream", {
 	{ "window-opened", open == 1, open },
 	{ "still-translating", inflight == "translating", inflight },

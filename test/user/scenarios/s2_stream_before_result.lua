@@ -5,6 +5,7 @@ H.wait(500)
 local map_during = H.map() ~= ""
 H.esc()
 H.wait(400)
+H.settle()
 H.report("S2 streaming esc before first result", {
 	{ "cancel-key-installed", map_during, map_during },
 	{ "proc-killed", H.procs() == 0, H.procs() },

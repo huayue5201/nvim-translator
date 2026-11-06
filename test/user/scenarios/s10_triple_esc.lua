@@ -6,6 +6,7 @@ H.esc()
 H.esc()
 H.esc()
 H.wait(400)
+H.settle()
 H.report("S10 triple esc", {
 	{ "no-error", #H.msgs == 0, H.msgs },
 	{ "proc", H.procs() == 0, H.procs() },

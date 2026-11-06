@@ -4,6 +4,7 @@ vim.cmd(":Translate hello")
 H.wait(500)
 vim.cmd(":TranslateCancel")
 H.wait(300)
+H.settle()
 H.report("S8 :TranslateCancel", {
 	{ "proc-killed", H.procs() == 0, H.procs() },
 	{ "status", vim.g.translator_status == "", vim.g.translator_status },

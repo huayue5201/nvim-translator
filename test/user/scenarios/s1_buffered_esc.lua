@@ -5,6 +5,7 @@ H.wait(500)
 local during = { vim.g.translator_status, H.procs(), H.floats(), H.map() ~= "" }
 H.esc()
 H.wait(500)
+H.settle()
 H.report("S1 buffered esc", {
 	{ "status-during=translating", during[1] == "translating", during[1] },
 	{ "proc-during", during[2] == 1, during[2] },

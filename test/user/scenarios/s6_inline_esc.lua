@@ -9,6 +9,7 @@ local map_during = H.map() ~= ""
 H.esc()
 H.wait(400)
 local ns = vim.api.nvim_create_namespace("translator_inline")
+H.settle()
 H.report("S6 inline esc", {
 	{ "cancel-key-installed", map_during, map_during },
 	{ "proc-killed", H.procs() == 0, H.procs() },

@@ -5,6 +5,7 @@ require("translator").start("replace", { args = "", range = 1 })
 H.wait(400)
 H.esc()
 H.wait(400)
+H.settle()
 H.report("S5 replace esc", {
 	{
 		"buffer-untouched",

@@ -27,12 +27,13 @@ local current_abort = nil
 function M.apply_result(displaymode, translations, options)
 	state.set(translations, options)
 
-	if displaymode == "window" then
-		action.window(translations, options)
+	-- 未知模式一律按窗口处理：只有显式 "replace" 才允许改写 buffer。
+	if displaymode == "replace" then
+		action.replace(translations, options)
 	elseif displaymode == "interactive" then
 		action.interactive(translations, options)
 	else
-		action.replace(translations, options)
+		action.window(translations, options)
 	end
 
 	history.save(translations)

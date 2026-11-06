@@ -65,6 +65,14 @@ function H.esc()
 	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
 end
 
+--- Wait (bounded) until no fake backend process is left, so assertions about
+--- cancellation are not racy with process reaping.
+function H.settle(ms)
+	vim.wait(ms or 2000, function()
+		return H.procs() == 0
+	end)
+end
+
 function H.wait(ms)
 	vim.wait(ms, function()
 		return false
