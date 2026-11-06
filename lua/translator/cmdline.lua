@@ -12,6 +12,10 @@ function M.parse(opts)
 		source_lang = "",
 		target_lang = "",
 		bilingual = nil,
+		-- 命令的范围信息，replace 模式和日志都要用（0 = 无范围）。
+		range = opts.range or 0,
+		line1 = opts.line1 or 1,
+		line2 = opts.line2 or 1,
 	}
 
 	-------------------------------------------------------------------

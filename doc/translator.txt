@@ -65,6 +65,8 @@ Or manually: >
 :TranslateR
         Replace the visual selection with the translation. A blockwise
         selection is translated cell by cell, each cell keeping its columns.
+        Without a visual selection the word under the cursor is replaced; with
+        an explicit line range (e.g. :2,5TranslateR) those lines are replaced.
 
                                                     *:TranslateX*
 :TranslateX

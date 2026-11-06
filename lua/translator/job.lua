@@ -32,7 +32,7 @@ function M.apply_result(displaymode, translations, options)
 	elseif displaymode == "interactive" then
 		action.interactive(translations, options)
 	else
-		action.replace(translations)
+		action.replace(translations, options)
 	end
 
 	history.save(translations)

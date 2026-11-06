@@ -16,6 +16,17 @@ vim.notify = function(msg, level)
 	table.insert(H.msgs, tostring(level) .. ": " .. tostring(msg))
 end
 
+-- The plugin reports through nvim_echo; record that too.
+local echo = vim.api.nvim_echo
+vim.api.nvim_echo = function(chunks, history, opts)
+	local parts = {}
+	for _, chunk in ipairs(chunks or {}) do
+		parts[#parts + 1] = tostring(chunk[1])
+	end
+	table.insert(H.msgs, table.concat(parts))
+	return echo(chunks, history, opts)
+end
+
 --- Point the plugin at the fake backend and give the buffer some text.
 ---@param over table|nil extra `setup()` overrides
 function H.setup(over)

@@ -192,7 +192,34 @@ end
 ---------------------------------------------------------------------
 -- Replace selected text
 ---------------------------------------------------------------------
-function M.replace(trans)
+--- 光标所在单词的字节范围（0-based，end 不含）。
+---@return { line:integer, start_col:integer, end_col:integer }|nil
+local function word_span_under_cursor()
+	local pos = vim.api.nvim_win_get_cursor(0)
+	local lnum, col = pos[1] - 1, pos[2]
+	local line = vim.api.nvim_get_current_line()
+
+	local word = vim.fn.expand("<cword>")
+	if word == "" then
+		return nil
+	end
+
+	-- 找到覆盖光标的那个出现位置（<cword> 与 plain find 的语义一致，
+	-- 且不依赖 iskeyword）。
+	local init = 1
+	while true do
+		local s, e = line:find(word, init, true)
+		if not s then
+			return nil
+		end
+		if col >= s - 1 and col < e then
+			return { line = lnum, start_col = s - 1, end_col = e }
+		end
+		init = s + 1
+	end
+end
+
+function M.replace(trans, options)
 	local replacement = nil
 
 	for _, t in ipairs(trans.results) do
@@ -220,19 +247,36 @@ function M.replace(trans)
 		finish = vim.fn.getpos("'>")
 	end
 
+	local srow, scol, erow, ecol
 	if start[2] == 0 or finish[2] == 0 then
-		util.show_msg("No visual selection to replace", "warning")
-		return
-	end
+		-- 没有可视选区：显式行范围（:2,3TranslateR）替换整段，否则回退到
+		-- 光标下的单词（:TranslateR 在普通模式下的默认行为）。
+		local line1 = options and options.line1 or 1
+		local line2 = options and options.line2 or line1
+		if options and (options.range or 0) > 0 then
+			srow, erow = line1 - 1, line2 - 1
+			scol = 0
+			local last = vim.api.nvim_buf_get_lines(0, erow, erow + 1, false)[1] or ""
+			ecol = #last - 1
+		else
+			local span = word_span_under_cursor()
+			if not span then
+				util.show_msg("No word under cursor to replace", "warning")
+				return
+			end
+			srow, erow = span.line, span.line
+			scol, ecol = span.start_col, span.end_col - 1
+		end
+	else
+		srow = start[2] - 1
+		scol = start[3] - 1
+		erow = finish[2] - 1
+		ecol = finish[3] - 1 -- end 包含在内
 
-	local srow = start[2] - 1
-	local scol = start[3] - 1
-	local erow = finish[2] - 1
-	local ecol = finish[3] - 1 -- ← 修复这里
-
-	if erow < srow or (erow == srow and ecol < scol) then
-		srow, erow = erow, srow
-		scol, ecol = ecol, scol
+		if erow < srow or (erow == srow and ecol < scol) then
+			srow, erow = erow, srow
+			scol, ecol = ecol, scol
+		end
 	end
 
 	-- 统一换行符，避免 LLM 返回 \r\n 时把 \r 写进 buffer

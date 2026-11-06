@@ -400,25 +400,23 @@ end
 -- -> current line -> word under cursor.
 ---------------------------------------------------------------------
 function M.get_text_from_context(opts)
-	if opts.range > 0 then
-		local s = vim.fn.getpos("'<")
-		local e = vim.fn.getpos("'>")
-		if s[2] == opts.line1 and e[2] == opts.line2 then
-			local sel = M.get_visual_selection()
-			if sel ~= "" then
-				return sel
-			end
+	if opts.range == 0 then
+		return vim.fn.expand("<cword>")
+	end
+
+	-- 选区（visual 模式下的 :'<,'>Translate）优先于行范围。
+	local s = vim.fn.getpos("'<")
+	local e = vim.fn.getpos("'>")
+	if s[2] == opts.line1 and e[2] == opts.line2 then
+		local sel = M.get_visual_selection()
+		if sel ~= "" then
+			return sel
 		end
 	end
 
-	if opts.range == 0 then
-		return vim.fn.expand("<cword>")
-	elseif opts.range == 1 then
-		return vim.api.nvim_get_current_line()
-	else
-		local lines = vim.api.nvim_buf_get_lines(0, opts.line1 - 1, opts.line2, false)
-		return table.concat(lines, "\n")
-	end
+	-- 显式行范围（:2Translate、:2,5Translate、:%Translate）。
+	local lines = vim.api.nvim_buf_get_lines(0, opts.line1 - 1, opts.line2, false)
+	return table.concat(lines, "\n")
 end
 
 return M

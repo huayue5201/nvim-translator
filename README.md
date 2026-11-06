@@ -40,7 +40,7 @@ make build
 | ----------------- | ------------------------------------------------------- |
 | `:Translate` | Translate the word / selection / text in a floating window |
 | `:TranslateW` | Show translation in a floating window |
-| `:TranslateR` | Replace the visual selection with the translation (block selections are replaced cell by cell) |
+| `:TranslateR` | Replace the visual selection with the translation (block selections are replaced cell by cell; without a selection it replaces the word under the cursor) |
 | `:TranslateX` | Translate the `*` (system clipboard) register |
 | `:TranslateI` | Prompt for text, then translate it (interactive) |
 | `:TranslateApi` | Translate a code API symbol with its documentation |
