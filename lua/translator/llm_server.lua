@@ -29,7 +29,7 @@ end
 local function running(s)
 	local url = s.health
 	if url and url ~= "" then
-		local res = async.run(proc.run, {
+		local res = async.await(async.run(proc.run, {
 			"curl",
 			"-s",
 			"--max-time",
@@ -39,7 +39,7 @@ local function running(s)
 			"-w",
 			"%{http_code}",
 			url,
-		})
+		}))
 		return vim.trim(res.stdout) == "200"
 	end
 	-- 未配置 health 时按进程名判断
@@ -47,7 +47,7 @@ local function running(s)
 	if name == "" then
 		return false
 	end
-	local res = async.run(proc.run, { "pgrep", "-f", name })
+	local res = async.await(async.run(proc.run, { "pgrep", "-f", name }))
 	return res.code == 0 and vim.trim(res.stdout) ~= ""
 end
 

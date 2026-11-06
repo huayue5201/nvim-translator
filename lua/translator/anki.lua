@@ -20,7 +20,7 @@ end
 local function request(action, params)
 	local cfg = config()
 	local body = vim.json.encode({ action = action, version = 6, params = params })
-	local res = async.run(proc.run, {
+	local res = async.await(async.run(proc.run, {
 		"curl",
 		"-s",
 		"-m",
@@ -30,7 +30,7 @@ local function request(action, params)
 		"http://127.0.0.1:" .. cfg.port,
 		"-d",
 		body,
-	})
+	}))
 
 	if res.code ~= 0 then
 		return nil, "AnkiConnect 不可达：请确认 Anki 正在运行，且已安装 AnkiConnect 插件"
