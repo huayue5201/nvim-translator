@@ -272,7 +272,7 @@ function M.open(opts)
 	-------------------------------------------------------------------
 	-- Bind keys + auto-grow events
 	-------------------------------------------------------------------
-	for i, w in ipairs(windows) do
+	for _, w in ipairs(windows) do
 		local buf = w.buf
 
 		vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {

@@ -71,9 +71,10 @@ make build
 
 移动光标同样会关闭窗口,与之前一致。
 
-翻译请求进行中时,`<Esc>` 会中断它(结束后端进程并停止旋转提示)。该键仅在
-普通/可视模式下、且你尚未自行映射该键时临时绑定,请求结束后自动移除。可用
-`cancel_key = false` 关闭,或用 `:TranslateCancel` 显式中断。
+翻译请求进行中时,`<Esc>` 会中断它(结束后端进程、停止旋转提示并关闭骨架窗口)。
+请求一发出即可生效——包括流式请求还没返回第一个引擎、以及整篇 `:TranslateV`
+批量请求的时候。该键在普通/可视模式下临时绑定,请求结束后自动移除,并恢复你
+原来的 `<Esc>` 映射。可用 `cancel_key = false` 关闭,或用 `:TranslateCancel` 显式中断。
 
 多引擎结果**增量显示**:**第一个**引擎返回就弹出浮窗,之后每多一个引擎就在底部追加
 一段、窗口随之增高(按到达顺序),不再等最慢的源。仍有请求未返回时,末尾显示
@@ -152,6 +153,7 @@ vim.g.translator_bilingual = true
 :'<,'>TranslateV       " 可视选区
 :TranslateV            " 再次执行 = 关闭当前 buffer 的对照
 :TranslateVClear       " 清除所有 buffer 的虚拟译文
+" 批量请求还在进行时,<Esc> 可中止(已翻译的行保留)
 ```
 
 **只翻译注释和字符串字面量**,代码行不动:有 Tree-sitter parser 时直接取
@@ -636,10 +638,16 @@ require("translator").setup({
 ## 开发
 
 ```sh
-make build   # cargo build --release && 安装到 bin/
-make test    # cargo test(响应解析器的离线单元测试)
+make build      # cargo build --release && 安装到 bin/
+make test       # cargo test(响应解析器的离线单元测试)
+make test-user  # 用户级场景测试(真实命令 + <Esc>,慢速假后端)
+make lint       # stylua --check + luacheck
 make clean
 ```
+
+`test/user/` 按用户的方式驱动插件——真实执行 `:Translate*` 命令、真实按键,
+后端是 `test/user/fake_backend.py`;覆盖请求在途时按 `<Esc>` 中止等场景
+(详见 `test/user/README.md`)。
 
 后端是 `rust/` 下的单一 crate。每个引擎位于 `rust/src/engines/`,在 stdout
 返回一个 JSON 对象:

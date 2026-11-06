@@ -75,10 +75,12 @@ mapped while the window is open and restored afterwards):
 Moving the cursor also closes the window, as before.
 
 While a translation request is in flight, `<Esc>` aborts it (kills the backend
-process and stops the spinner). The key is only bound in normal/visual mode,
-only when you haven't mapped it yourself, and is removed once the request
-settles. Disable it with `cancel_key = false`, or cancel explicitly with
-`:TranslateCancel`.
+process, stops the spinner and closes the skeleton window). It works from the
+moment the request is sent — including while a streaming request has not
+returned its first engine yet, and for buffer-wide `:TranslateV` batches.
+The key is bound in normal/visual mode and removed once the request settles;
+your own `<Esc>` mapping is restored afterwards. Disable it with
+`cancel_key = false`, or cancel explicitly with `:TranslateCancel`.
 
 Multi-engine results are shown **incrementally**: the floating window pops up
 as soon as the **first** engine returns, then grows one section at a time as
@@ -164,6 +166,7 @@ modified, so editing, undo and syntax highlighting stay untouched:
 :'<,'>TranslateV       " visual range
 :TranslateV            " run again = turn it off for this buffer
 :TranslateVClear       " remove virtual translations everywhere
+" <Esc> aborts a batch that is still in flight (already translated lines stay)
 ```
 
 **Only comments and string literals are translated** — code lines are left
@@ -681,10 +684,16 @@ models automatically misses old entries.
 ## Development
 
 ```sh
-make build   # cargo build --release && install to bin/
-make test    # cargo test (offline unit tests for response parsers)
+make build      # cargo build --release && install to bin/
+make test       # cargo test (offline unit tests for response parsers)
+make test-user  # user-level scenarios (real commands + <Esc>, slow fake backend)
+make lint       # stylua --check + luacheck
 make clean
 ```
+
+`test/user/` drives the plugin the way a user does — `:Translate*` commands and
+real key presses against `test/user/fake_backend.py` — and covers cancelling an
+in-flight request (see `test/user/README.md`).
 
 The backend is a single crate under `rust/`. Each engine lives in
 `rust/src/engines/` and returns a JSON object on stdout:

@@ -25,9 +25,6 @@ end
 
 -- Forward declaration: secondary actions install_maps/add_anki refer to it.
 local close
--- Esc handler: cancel an in-flight (streaming) request, else just close.
-local esc_close
-
 ---------------------------------------------------------------------
 -- Secondary actions (operate on the last translation)
 ---------------------------------------------------------------------
@@ -117,11 +114,8 @@ local function install_maps()
 		{ "n", "S", speak_target },
 		{ "n", "a", add_anki },
 		{ "n", "y", copy_paraphrase },
-		{ "n", "<Esc>", esc_close },
-		-- 可视模式翻译后浮窗弹出，光标仍处可视模式；让 <Esc> 优先关闭浮窗
-		-- 而不是先退出选择，避免用户需要按两下 Esc。
-		-- 注：'v' 模式映射覆盖 v / V / Ctrl-V 全部可视模式，无需单独注册 'x'。
-		{ "v", "<Esc>", esc_close },
+		-- <Esc> 由 translator.cancel 统一管理：窗口打开期间注册关闭句柄，
+		-- 请求在途时同时注册中止句柄，二者共享同一个按键、互不覆盖。
 	}
 	for _, m in ipairs(maps) do
 		saved_maps[m[1] .. ":" .. m[2]] = find_global_map(m[1], m[2])
@@ -149,6 +143,10 @@ local function footer()
 end
 
 close = function()
+	if state_win.cancel then
+		require("translator.cancel").unregister(state_win.cancel)
+		state_win.cancel = nil
+	end
 	if win_valid(state_win.win) then
 		pcall(vim.api.nvim_win_close, state_win.win, true)
 	end
@@ -158,18 +156,6 @@ close = function()
 	clear_maps()
 	pcall(vim.api.nvim_del_augroup_by_name, state_win.aug)
 	state_win.aug = "translator_float_close"
-end
-
--- During an in-flight (streaming) request Esc aborts it; otherwise it just
--- closes the peek window. Honours cancel_key = false as "no cancellation".
-esc_close = function()
-	local cfg = require("translator.config").get()
-	local disabled = cfg.cancel_key == false or cfg.cancel_key == ""
-	if not disabled and vim.g.translator_status == "translating" then
-		require("translator.job").cancel()
-	else
-		close()
-	end
 end
 
 ---------------------------------------------------------------------
@@ -274,6 +260,14 @@ function M.create(lines, cfg)
 	})
 
 	install_maps()
+
+	-- 可视模式翻译后浮窗弹出、光标仍在可视模式：'v' 映射覆盖 v/V/Ctrl-V，
+	-- 让 <Esc> 优先关闭浮窗，而不是先退出选择（需要按两下）。
+	local function on_cancel()
+		close()
+	end
+	state_win.cancel = on_cancel
+	require("translator.cancel").register(on_cancel)
 
 	local aug = vim.api.nvim_create_augroup(state_win.aug, { clear = true })
 	vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {

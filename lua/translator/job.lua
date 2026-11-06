@@ -10,6 +10,7 @@ local config = require("translator.config")
 local spinner = require("translator.spinner")
 local llm_server = require("translator.llm_server")
 local proc = require("translator.proc")
+local cancel = require("translator.cancel")
 
 local async = vim.async
 
@@ -17,47 +18,8 @@ local M = {}
 
 -- 在途翻译任务：新请求会取消它（中止子进程 + 回收 spinner）
 local translate_task = nil
-
----------------------------------------------------------------------
--- Cancel key: while a request is in flight, temporarily bind a key
--- (default <Esc>) to abort it. Only the modes the user hasn't already
--- mapped are touched, and the binding is removed once the request settles.
----------------------------------------------------------------------
-local cancel_key_modes = {} -- modes where we installed the bind
-
-local function cancel_key()
-	local key = config.get().cancel_key
-	if key == nil then
-		return "<Esc>"
-	end
-	return key
-end
-
-local function install_cancel_key()
-	local key = cancel_key()
-	if key == false or key == "" then
-		return
-	end
-	local opts = { silent = true, nowait = true, desc = "Cancel translation" }
-	for _, mode in ipairs({ "n", "v" }) do
-		if not cancel_key_modes[mode] and vim.fn.maparg(key, mode) == "" then
-			vim.keymap.set(mode, key, function()
-				M.cancel()
-			end, opts)
-			cancel_key_modes[mode] = true
-		end
-	end
-end
-
-local function remove_cancel_key()
-	local key = cancel_key()
-	for _, mode in ipairs({ "n", "v" }) do
-		if cancel_key_modes[mode] then
-			pcall(vim.keymap.del, mode, key)
-			cancel_key_modes[mode] = nil
-		end
-	end
-end
+-- 当前在途请求的取消句柄，供 cancel 模块登记/注销。
+local current_abort = nil
 
 ---------------------------------------------------------------------
 -- Apply a (fresh or cached) translation result: state + display + history.
@@ -203,7 +165,7 @@ local function handle_stdout(displaymode, options, key, message)
 	M.apply_result(displaymode, translations, options)
 end
 
-local function handle_stderr(displaymode, message)
+local function handle_stderr(message)
 	logger.log(message)
 	util.show_msg(message, "error")
 end
@@ -236,6 +198,10 @@ end
 -- Start one translation, cancelling any request already in flight.
 ---------------------------------------------------------------------
 function M.jobstart(cmd, stdin, displaymode, env, options, key)
+	if current_abort then
+		cancel.unregister(current_abort)
+		current_abort = nil
+	end
 	if translate_task then
 		translate_task:close()
 	end
@@ -249,19 +215,33 @@ function M.jobstart(cmd, stdin, displaymode, env, options, key)
 
 	local streaming = stream_enabled(displaymode)
 
-	-- 流式模式下浮窗自身处理 <Esc>（cancel-aware），避免与默认 cancel_key
-	-- 重复绑定导致互相覆盖。非默认 cancel_key 仍照常临时绑定。
-	local ck = cancel_key()
-	if not (streaming and ck == "<Esc>") then
-		install_cancel_key()
-	end
-
 	if streaming then
 		-- insert right after the subcommand ("translate"), before option flags
 		table.insert(cmd, 3, "--stream")
 	end
 
 	local my_task
+
+	-- 请求一发出就能中止：即使流式窗口还没弹出（首条结果未到），<Esc>
+	-- 也必须生效。浮窗打开后，窗口内的局部 <Esc> 映射优先于全局映射。
+	local function abort()
+		if current_abort ~= abort then
+			return
+		end
+		current_abort = nil
+		cancel.unregister(abort)
+
+		vim.g.translator_status = ""
+		spinner.close()
+		-- 关闭流式骨架窗口（buffered 模式下无窗口，close 为安全 no-op）。
+		require("translator.window").close()
+		if translate_task then
+			local task = translate_task
+			translate_task = nil
+			task:close()
+		end
+	end
+
 	my_task = async.run(function()
 		-- 按需启动本地 LLM 服务（llama-server 等），已运行则秒回。
 		llm_server.ensure()
@@ -325,9 +305,10 @@ function M.jobstart(cmd, stdin, displaymode, env, options, key)
 			async.sleep(0)
 
 			translate_task = nil
+			current_abort = nil
+			cancel.unregister(abort)
 			vim.g.translator_status = ""
 			spinner.close()
-			remove_cancel_key()
 
 			if not ok then
 				util.show_msg("Translation failed: " .. tostring(stderr), "error")
@@ -368,9 +349,10 @@ function M.jobstart(cmd, stdin, displaymode, env, options, key)
 		async.sleep(0)
 
 		translate_task = nil
+		current_abort = nil
+		cancel.unregister(abort)
 		vim.g.translator_status = ""
 		spinner.close()
-		remove_cancel_key()
 
 		if not ok then
 			util.show_msg("Translation failed: " .. tostring(stdout), "error")
@@ -381,10 +363,12 @@ function M.jobstart(cmd, stdin, displaymode, env, options, key)
 		if out ~= "" then
 			handle_stdout(displaymode, options, key, out)
 		else
-			handle_stderr(displaymode, util.safe_trim(stderr or ""))
+			handle_stderr(util.safe_trim(stderr or ""))
 		end
 	end)
 	translate_task = my_task
+	current_abort = abort
+	cancel.register(abort)
 
 	-- 顶层任务是静默的，显式观测失败（忽略取消）。
 	-- on_complete 可能在快速上下文中触发，必须切回主循环再调 UI/notify。
@@ -400,28 +384,13 @@ function M.jobstart(cmd, stdin, displaymode, env, options, key)
 end
 
 ---------------------------------------------------------------------
--- Cancel the in-flight request: abort the child process, close the
--- (possibly still-streaming) window, drop the spinner, reset status and
--- remove the temporary cancel key.
+-- Cancel the in-flight request (and any other registered async work).
 ---------------------------------------------------------------------
----@return boolean whether a request was actually in flight
+---@return boolean whether something was in flight
 function M.cancel()
-	remove_cancel_key()
-	vim.g.translator_status = ""
-	spinner.close()
-
-	local task = translate_task
-	translate_task = nil
-
-	-- 关闭流式骨架窗口（buffered 模式下无窗口，close 为安全 no-op）。
-	require("translator.window").close()
-
-	if not task then
-		return false
-	end
-
-	task:close()
-	return true
+	local in_flight = current_abort ~= nil
+	cancel.cancel()
+	return in_flight
 end
 
 return M

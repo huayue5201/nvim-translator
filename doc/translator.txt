@@ -174,15 +174,18 @@ comment syntax and translate every non-empty line instead. Related options: >
         concurrency = 4,   -- backend concurrency for the batch
     },
 <
-Use |:TranslateVClear| to remove all virtual translations at once.
+Use |:TranslateVClear| to remove all virtual translations at once. <Esc>
+aborts a batch that is still in flight; lines translated so far stay.
 
 CANCELLING A REQUEST                                   *translator-cancel-key*
 
-While a request is in flight, <Esc> aborts it (kills the backend process and
-stops the spinner). The binding is installed only for normal/visual mode and
-only when you haven't already mapped that key; it is removed as soon as the
-request settles. Use :TranslateCancel to cancel explicitly, or set
-`cancel_key = false` to disable the key binding.
+While a request is in flight, <Esc> aborts it (kills the backend process, stops
+the spinner and closes the skeleton window). The binding takes effect as soon
+as the request is sent, so it also works while a streaming request has not
+returned its first engine yet, and for buffer-wide |:TranslateV| batches. It
+is installed in normal/visual mode, removed when the request settles, and any
+mapping you had on that key is restored. Use |:TranslateCancel| to cancel
+explicitly, or set `cancel_key = false` to disable the key binding.
 
 INCREMENTAL RESULTS                                   *translator-incremental*
 

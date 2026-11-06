@@ -1,4 +1,4 @@
-.PHONY: build test clean
+.PHONY: build test test-user lint clean
 
 # Build the Rust backend and install it to ./bin/translator
 build:
@@ -8,6 +8,15 @@ build:
 
 test:
 	cd rust && cargo test
+
+# Static checks (requires stylua + luacheck).
+lint:
+	stylua --check lua plugin after test
+	luacheck lua plugin after
+
+# User-level scenarios: real commands, real <Esc>, slow fake backend.
+test-user:
+	@test/user/run.sh
 
 clean:
 	cd rust && cargo clean

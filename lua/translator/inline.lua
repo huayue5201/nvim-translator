@@ -8,6 +8,7 @@
 -- trigger a debounced re-translation.
 
 local batch = require("translator.batch")
+local cancel = require("translator.cancel")
 local binary = require("translator.binary")
 local cache = require("translator.cache")
 local cmdline = require("translator.cmdline")
@@ -168,6 +169,11 @@ function M.clear(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	local sess = sessions[bufnr]
 	if sess then
+		sess.done = true
+		if sess.cancel then
+			cancel.unregister(sess.cancel)
+			sess.cancel = nil
+		end
 		if sess.timer then
 			sess.timer:stop()
 			sess.timer:close()
@@ -328,6 +334,27 @@ function M.translate(opts)
 		return
 	end
 
+	-- <Esc> stops the batch; lines translated so far stay on screen.
+	local function finish()
+		sess.done = true
+		sess.proc = nil
+		if sess.cancel then
+			cancel.unregister(sess.cancel)
+			sess.cancel = nil
+		end
+	end
+	sess.cancel = function()
+		if sess.done then
+			return
+		end
+		if sess.proc then
+			pcall(sess.proc.kill, sess.proc, 15)
+		end
+		finish()
+	end
+	sess.remaining = #pending
+	cancel.register(sess.cancel)
+
 	sess.proc = batch.start(
 		bin,
 		sess.env,
@@ -341,6 +368,9 @@ function M.translate(opts)
 		texts,
 		{
 			on_result = function(id, decoded)
+				if sess.done then
+					return
+				end
 				local item = pending[id + 1] -- `id` is the 0-based index into `texts`
 				if not item or sessions[bufnr] ~= sess then
 					return
@@ -349,8 +379,16 @@ function M.translate(opts)
 					cache.set(item.key, decoded)
 				end
 				store(sess, item, pick_translation(decoded))
+				sess.remaining = sess.remaining - 1
+				if sess.remaining <= 0 then
+					finish()
+				end
 			end,
 			on_error = function(message)
+				if sess.done then
+					return
+				end
+				finish()
 				if sess.warned or sessions[bufnr] ~= sess then
 					return
 				end

@@ -108,7 +108,8 @@ local defaults = {
 	spinner = {
 		enable = true,
 	},
-	-- 翻译进行中临时绑定此键以取消请求（仅 n/v 模式，且用户未占用时）；false/"" 关闭。
+	-- 有请求在途（或虚拟文本窗口打开）时临时绑定此键以取消；false/"" 关闭。
+	-- 用户自己的映射会在取消结束后恢复。
 	cancel_key = "<Esc>",
 	tts = {
 		engine = "say",

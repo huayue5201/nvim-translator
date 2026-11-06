@@ -117,7 +117,7 @@ end
 ---------------------------------------------------------------------
 -- Command completion
 ---------------------------------------------------------------------
-function M.complete(arg_lead, cmd_line, cursor_pos)
+function M.complete(_, cmd_line, cursor_pos)
 	local options = {
 		"--engines=",
 		"--source_lang=",
