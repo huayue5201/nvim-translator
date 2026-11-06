@@ -38,7 +38,7 @@ make build
 
 | Command | Action |
 | ----------------- | ------------------------------------------------------- |
-| `:Translate` | Echo translation for the word / selection / text |
+| `:Translate` | Translate the word / selection / text in a floating window |
 | `:TranslateW` | Show translation in a floating window |
 | `:TranslateR` | Replace the visual selection with the translation |
 | `:TranslateX` | Translate the `*` (system clipboard) register |

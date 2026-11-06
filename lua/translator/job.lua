@@ -14,9 +14,6 @@ local async = vim.async
 
 local M = {}
 
--- 最近一次成功翻译的结果（仅用于 echo 模式下报错时的回显）
-local stdout_save = nil
-
 -- 在途翻译任务：新请求会取消它（中止子进程 + 回收 spinner）
 local translate_task = nil
 
@@ -65,12 +62,9 @@ end
 -- Apply a (fresh or cached) translation result: state + display + history.
 ---------------------------------------------------------------------
 function M.apply_result(displaymode, translations, options)
-	stdout_save = translations
 	state.set(translations, options)
 
-	if displaymode == "echo" then
-		action.echo(translations)
-	elseif displaymode == "window" then
+	if displaymode == "window" then
 		action.window(translations, options)
 	elseif displaymode == "interactive" then
 		action.interactive(translations, options)
@@ -89,7 +83,6 @@ end
 -- (state + cache-less bookkeeping only; no window re-open).
 ---------------------------------------------------------------------
 local function commit_result(translations, options)
-	stdout_save = translations
 	state.set(translations, options)
 	history.save(translations)
 	llm_server.mark_active()
@@ -259,10 +252,6 @@ end
 local function handle_stderr(displaymode, message)
 	logger.log(message)
 	util.show_msg(message, "error")
-
-	if stdout_save and displaymode == "echo" then
-		action.echo(stdout_save)
-	end
 end
 
 ---------------------------------------------------------------------

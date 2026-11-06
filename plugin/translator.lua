@@ -24,7 +24,7 @@ local function run_translate(displaymode, opts)
 end
 
 vim.api.nvim_create_user_command("Translate", function(opts)
-	run_translate("echo", opts)
+	run_translate("window", opts)
 end, { nargs = "*", bang = true, range = true })
 
 vim.api.nvim_create_user_command("TranslateW", function(opts)
@@ -38,7 +38,7 @@ end, { nargs = "*", bang = true, range = true })
 vim.api.nvim_create_user_command("TranslateX", function(opts)
 	local clipboard = vim.fn.getreg("*")
 	local args = vim.trim((opts.args or "") .. " " .. clipboard)
-	require("translator").start("echo", {
+	require("translator").start("window", {
 		bang = opts.bang,
 		range = 0,
 		line1 = 1,

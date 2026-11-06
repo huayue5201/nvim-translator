@@ -89,7 +89,6 @@ local function build_window_content(trans, options)
 		table.insert(out, "─── " .. t.engine .. " ───")
 
 		if has_content then
-
 			if t.phonetic and t.phonetic ~= "" then
 				table.insert(out, MARK .. "[" .. t.phonetic .. "]")
 			end
@@ -188,62 +187,6 @@ function M.interactive(trans, options)
 	local content = build_window_content(trans, options)
 	logger.log(content)
 	window.open_interactive(content)
-end
-
----------------------------------------------------------------------
--- Echo display
----------------------------------------------------------------------
-function M.echo(trans)
-	local text = trans.text
-	if #text > 40 then
-		text = text:sub(1, 40) .. "..."
-	end
-
-	local chunks = {
-		{ text, "Function" },
-		{ " ==> ", "Constant" },
-	}
-
-	-- Show every engine that returned content, separated by a divider.
-	local first = true
-	for _, t in ipairs(trans.results) do
-		local has_content = (t.paraphrase and t.paraphrase ~= "")
-			or (t.explains and #t.explains > 0)
-			or (t.phonetic and t.phonetic ~= "")
-
-		if has_content then
-			if not first then
-				table.insert(chunks, { " │ ", "Comment" })
-			end
-			first = false
-
-			table.insert(chunks, { "[" .. t.engine .. "] ", "Identifier" })
-
-			if t.phonetic and t.phonetic ~= "" then
-				table.insert(chunks, { "[" .. t.phonetic .. "] ", "Type" })
-			end
-			if t.paraphrase and t.paraphrase ~= "" then
-				table.insert(chunks, { (t.paraphrase:gsub("[\r\n]+", " ")) .. " ", "Normal" })
-			end
-			if t.explains and #t.explains > 0 then
-				local seen = collect_seen(t.paraphrase)
-				local explains = {}
-				for _, e in ipairs(t.explains) do
-					if type(e) == "string" then
-						local dedup = e:gsub("[\r\n]+", " ")
-						if not seen[normalize_for_dedup(dedup)] then
-							explains[#explains + 1] = dedup
-						end
-					end
-				end
-				if #explains > 0 then
-					table.insert(chunks, { table.concat(explains, " "), "Normal" })
-				end
-			end
-		end
-	end
-
-	vim.api.nvim_echo(chunks, false, {})
 end
 
 ---------------------------------------------------------------------

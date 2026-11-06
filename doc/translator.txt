@@ -54,11 +54,12 @@ Or manually: >
 
                                                     *:Translate*
 :Translate [--key=value ...] [text]
-        Echo translation for the word / selection / text.
+        Translate the word / selection / text in a floating window
+        (same as |:TranslateW|).
 
                                                     *:TranslateW*
 :TranslateW
-        Show the translation in a floating window.
+        Show the translation in a floating window (alias of |:Translate|).
 
                                                     *:TranslateR*
 :TranslateR
