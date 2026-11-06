@@ -1,48 +1,69 @@
 -- File: lua/translator/inline.lua
--- Virtual-text bilingual mode: each comment / string literal gets its
--- translation drawn as a virtual line *below* its source line (extmark
--- `virt_lines`). The buffer itself is never modified, so editing / undo /
--- syntax stay untouched. See lua/translator/targets.lua for the scanner.
+-- Buffer-internal bilingual view (:TranslateV): translations are rendered as
+-- virtual lines under their source line, so the buffer itself is never
+-- modified and no extra window steals focus.
 --
---   :TranslateV          toggle for the whole buffer
---   :'<,'>TranslateV      toggle for the selected lines
---   :TranslateVClear      remove every virtual translation
+-- Only comments / string literals are translated (see translator.targets);
+-- plain-text filetypes translate every non-empty line. Edits to the buffer
+-- trigger a debounced re-translation.
 
-local util = require("translator.util")
-local cache = require("translator.cache")
-local config = require("translator.config")
+local batch = require("translator.batch")
 local binary = require("translator.binary")
+local cache = require("translator.cache")
 local cmdline = require("translator.cmdline")
+local config = require("translator.config")
+local highlight = require("translator.highlight")
 local targets = require("translator.targets")
+local util = require("translator.util")
 
 local M = {}
 
 local NS = vim.api.nvim_create_namespace("translator_inline")
-
---- bufnr -> session { bufnr, bin, env, engines, source_lang, target_lang,
----   proxy, force, queue, running, concurrency, stopped, hl, marks,
----   results, cfg, state }
 local sessions = {}
+local attached = {}
+local aug = nil
 
 local function inline_cfg()
 	return config.get().inline or {}
 end
 
 local function hl_group()
-	local g = require("translator.highlight").group_for("inline")
-	return g
+	return highlight.group_for("inline")
 end
 
 local function ensure_augroup()
-	local aug = vim.api.nvim_create_augroup("translator_inline", { clear = false })
-	if vim.g.translator_inline_aug then
+	if aug then
 		return
 	end
-	vim.g.translator_inline_aug = true
+	aug = vim.api.nvim_create_augroup("translator_inline", { clear = true })
 	vim.api.nvim_create_autocmd("BufWipeout", {
 		group = aug,
 		callback = function(args)
 			M.clear(args.buf)
+		end,
+	})
+
+	-- Re-translate after edits: extmark positions drift otherwise, and stale
+	-- translations would stay attached to the wrong line. on_lines also sees
+	-- API-driven changes (TextChanged does not).
+	vim.api.nvim_create_autocmd("BufWipeout", {
+		group = aug,
+		callback = function(args)
+			M.clear(args.buf)
+		end,
+	})
+end
+
+local function attach(bufnr)
+	attached[bufnr] = true
+	vim.api.nvim_buf_attach(bufnr, false, {
+		on_lines = function()
+			M.schedule_refresh(bufnr)
+			return sessions[bufnr] == nil
+		end,
+		on_detach = function()
+			attached[bufnr] = nil
+			sessions[bufnr] = nil
 		end,
 	})
 end
@@ -53,7 +74,7 @@ end
 --- Re-render the virtual lines for one source line from sess.results.
 local function render(sess, lnum)
 	local bufnr = sess.bufnr
-	if sess.stopped or not vim.api.nvim_buf_is_valid(bufnr) then
+	if not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
 
@@ -67,18 +88,13 @@ local function render(sess, lnum)
 		return
 	end
 
-	local indexes = {}
-	for idx in pairs(res) do
-		indexes[#indexes + 1] = idx
-	end
+	local indexes = vim.tbl_keys(res)
 	table.sort(indexes)
 	if #indexes == 0 then
 		return
 	end
 
 	local line = vim.api.nvim_buf_get_lines(bufnr, lnum - 1, lnum, false)[1] or ""
-
-	-- Keep indentation so the translation lines up under the source line.
 	local indent = line:match("^[ \t]*") or ""
 	local virt_lines = {}
 	for _, idx in ipairs(indexes) do
@@ -99,8 +115,7 @@ local function store(sess, item, translation)
 	if not translation or translation == "" then
 		return
 	end
-	local src = util.safe_trim(item.text)
-	if src:lower() == translation:lower() then
+	if util.safe_trim(item.text):lower() == translation:lower() then
 		return
 	end
 	sess.results[item.lnum] = sess.results[item.lnum] or {}
@@ -137,95 +152,6 @@ local function pick_translation(decoded)
 end
 
 ---------------------------------------------------------------------
--- Job queue (bounded concurrency; one backend process per line)
----------------------------------------------------------------------
-local start_next
-
-function start_next(sess)
-	if sess.stopped then
-		return
-	end
-	while sess.running < sess.concurrency and #sess.queue > 0 do
-		local item = table.remove(sess.queue, 1)
-		local options = {
-			text = item.text,
-			engines = sess.engines,
-			source_lang = sess.source_lang,
-			target_lang = sess.target_lang,
-		}
-		local key = cache.key(options, sess.env)
-
-		local cached = (not sess.force) and cache.get(key) or nil
-		if cached then
-			store(sess, item, pick_translation(cached))
-		else
-			sess.running = sess.running + 1
-
-			local cmd = {
-				sess.bin,
-				"translate",
-				"--target_lang",
-				sess.target_lang,
-				"--source_lang",
-				sess.source_lang,
-				"--engines",
-				table.concat(sess.engines, ","),
-			}
-			if sess.proxy and sess.proxy ~= "" then
-				table.insert(cmd, "--proxy")
-				table.insert(cmd, sess.proxy)
-			end
-			table.insert(cmd, item.text)
-
-			local stdout, stderr = {}, {}
-			local id
-			id = vim.fn.jobstart(cmd, {
-				env = sess.env,
-				stdout_buffered = true,
-				stderr_buffered = true,
-				on_stdout = function(_, data)
-					stdout = data or {}
-				end,
-				on_stderr = function(_, data)
-					stderr = data or {}
-				end,
-				on_exit = function()
-					local out, err = stdout, stderr
-					vim.schedule(function()
-						sess.running = math.max(0, sess.running - 1)
-						sess.jobs[id] = nil
-						if sess.stopped then
-							return
-						end
-
-						local raw = util.safe_trim(table.concat(out or {}, "\n"))
-						if raw ~= "" then
-							local ok, decoded = pcall(vim.json.decode, raw)
-							local tr = ok and pick_translation(decoded) or nil
-							if tr and cache.has_content(decoded) then
-								cache.set(key, decoded)
-							end
-							store(sess, item, tr)
-						elseif #err > 0 and sess.warned ~= true then
-							sess.warned = true
-							util.show_msg("虚拟翻译失败：" .. util.safe_trim(table.concat(err, " ")), "error")
-						end
-
-						start_next(sess)
-					end)
-				end,
-			})
-			if id <= 0 then
-				sess.running = math.max(0, sess.running - 1)
-				util.show_msg("无法启动翻译后端", "error")
-				return
-			end
-			sess.jobs[id] = true
-		end
-	end
-end
-
----------------------------------------------------------------------
 -- Public API
 ---------------------------------------------------------------------
 --- Whether a virtual-text session exists for the buffer.
@@ -236,18 +162,19 @@ function M.active(bufnr)
 	return sessions[bufnr] ~= nil
 end
 
---- Remove virtual translations for one buffer (stops in-flight jobs).
+--- Remove virtual translations for one buffer (stops in-flight work).
 ---@param bufnr integer|nil
 function M.clear(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	local sess = sessions[bufnr]
 	if sess then
-		sess.stopped = true
-		for id in pairs(sess.jobs) do
-			pcall(vim.fn.jobstop, id)
+		if sess.timer then
+			sess.timer:stop()
+			sess.timer:close()
 		end
-		sess.jobs = {}
-		sess.queue = {}
+		if sess.proc then
+			pcall(sess.proc.kill, sess.proc, 15)
+		end
 		sessions[bufnr] = nil
 	end
 	if vim.api.nvim_buf_is_valid(bufnr) then
@@ -260,6 +187,25 @@ function M.clear_all()
 	for bufnr in pairs(sessions) do
 		M.clear(bufnr)
 	end
+end
+
+--- Debounced re-translation after a buffer edit.
+---@param bufnr integer
+function M.schedule_refresh(bufnr)
+	local sess = sessions[bufnr]
+	if not sess or not sess.origin then
+		return
+	end
+	sess.timer = sess.timer or vim.uv.new_timer()
+	sess.timer:stop()
+	sess.timer:start(400, 0, function()
+		vim.schedule(function()
+			if sessions[bufnr] ~= sess or not vim.api.nvim_buf_is_valid(bufnr) then
+				return
+			end
+			M.translate(sess.origin)
+		end)
+	end)
 end
 
 --- Translate the current buffer (or the given range) and show the result as
@@ -312,13 +258,11 @@ function M.translate(opts)
 		return
 	end
 
-	-- Fresh session (drops the previous one for this buffer).
 	M.clear(bufnr)
 	ensure_augroup()
 
 	local sess = {
 		bufnr = bufnr,
-		bin = bin,
 		env = require("translator").backend_env(),
 		engines = parsed.engines,
 		source_lang = parsed.source_lang,
@@ -326,43 +270,95 @@ function M.translate(opts)
 		proxy = config.get().proxy_url,
 		force = parsed.force == true,
 		concurrency = math.max(1, tonumber(inline_cfg().concurrency) or 4),
-		queue = {},
-		jobs = {},
-		running = 0,
-		stopped = false,
+		origin = { range = opts.range or 0, line1 = first, line2 = last, args = opts.args },
 		marks = {},
 		results = {},
-		cfg = targets.cfg(bufnr),
-		state = targets.new_state(),
 		hl = hl_group(),
 	}
 	sessions[bufnr] = sess
+	if not attached[bufnr] then
+		attach(bufnr)
+	end
 
-	local plain = targets.plain(sess.cfg)
-	for i, line in ipairs(lines) do
-		local lnum = first + i - 1
-		if plain then
-			local trimmed = util.safe_trim(line)
-			-- Skip blanks and lines with no letters / CJK (punctuation, symbols).
-			if trimmed ~= "" and (util.has_cjk(trimmed) or trimmed:match("%a")) then
-				table.insert(sess.queue, { lnum = lnum, idx = 1, text = trimmed })
-			end
-		else
-			-- Only comments and string literals; code is left alone.
-			for idx, seg in ipairs(targets.line(line, sess.cfg, sess.state)) do
-				table.insert(sess.queue, { lnum = lnum, idx = idx, text = seg.text, kind = seg.kind })
-			end
+	local segs = targets.scan(bufnr, first, last)
+	local lnums = vim.tbl_keys(segs)
+	table.sort(lnums)
+
+	local items = {}
+	for _, lnum in ipairs(lnums) do
+		for idx, seg in ipairs(segs[lnum]) do
+			items[#items + 1] = {
+				lnum = lnum,
+				idx = idx,
+				text = (seg.text:gsub("[\r\n]+", " ")), -- one text per stdin line
+				kind = seg.kind,
+			}
 		end
 	end
 
-	if #sess.queue == 0 then
+	if #items == 0 then
 		sessions[bufnr] = nil
-		local why = plain and "没有可翻译的文本行" or "未发现可翻译的注释或字符串"
+		local why = targets.plain(targets.cfg(bufnr)) and "没有可翻译的文本行"
+			or "未发现可翻译的注释或字符串"
 		util.show_msg(why, "warning")
 		return
 	end
 
-	start_next(sess)
+	-- Serve cache hits immediately; everything else goes out as one batch.
+	local pending, texts = {}, {}
+	for _, item in ipairs(items) do
+		item.key = cache.key({
+			text = item.text,
+			engines = sess.engines,
+			source_lang = sess.source_lang,
+			target_lang = sess.target_lang,
+		}, sess.env)
+
+		local cached = (not sess.force) and cache.get(item.key) or nil
+		local translation = cached and pick_translation(cached)
+		if translation then
+			store(sess, item, translation)
+		else
+			pending[#pending + 1] = item
+			texts[#texts + 1] = item.text
+		end
+	end
+
+	if #pending == 0 then
+		return
+	end
+
+	sess.proc = batch.start(
+		bin,
+		sess.env,
+		{
+			engines = sess.engines,
+			source_lang = sess.source_lang,
+			target_lang = sess.target_lang,
+			proxy = sess.proxy,
+			concurrency = sess.concurrency,
+		},
+		texts,
+		{
+			on_result = function(id, decoded)
+				local item = pending[id + 1] -- `id` is the 0-based index into `texts`
+				if not item or sessions[bufnr] ~= sess then
+					return
+				end
+				if cache.has_content(decoded) then
+					cache.set(item.key, decoded)
+				end
+				store(sess, item, pick_translation(decoded))
+			end,
+			on_error = function(message)
+				if sess.warned or sessions[bufnr] ~= sess then
+					return
+				end
+				sess.warned = true
+				util.show_msg("虚拟翻译失败：" .. message, "error")
+			end,
+		}
+	)
 end
 
 --- Toggle virtual bilingual display for the current buffer.

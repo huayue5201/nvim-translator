@@ -27,7 +27,7 @@ API-documentation engine for translating code symbols.
 ==============================================================================
 2. REQUIREMENTS                                      *translator-requirements*
 
-- Neovim 0.8+ (0.10+ recommended; TTS and Anki features need 0.10+)
+- Neovim 0.13+ (uses |vim.async| and |vim.system()|)
 - Rust toolchain (`cargo`) — only needed once, to build the backend binary
 - `curl` — for the Anki feature
 
@@ -63,7 +63,8 @@ Or manually: >
 
                                                     *:TranslateR*
 :TranslateR
-        Replace the visual selection with the translation.
+        Replace the visual selection with the translation. A blockwise
+        selection is translated cell by cell, each cell keeping its columns.
 
                                                     *:TranslateX*
 :TranslateX
@@ -155,21 +156,22 @@ double-width in some fonts and misalign the translation.
 IN-BUFFER BILINGUAL VIEW                              *translator-inline*
 
 :TranslateV renders each line's translation as a virtual line below the
-source line, leaving the buffer untouched. Lines are requested in parallel,
-respecting `inline.concurrency` (default 4); cache hits render immediately and
-blank / symbol-only lines are skipped. The virtual line keeps the source
-line's indentation.
+source line, leaving the buffer untouched. The whole range is sent as one
+batch request (`inline.concurrency` controls its parallelism); cache hits
+render immediately and blank / symbol-only lines are skipped. The virtual
+line keeps the source line's indentation, and editing the buffer triggers a
+debounced re-translation.
 
-Only comments and string literals are translated: the scanner uses the
-buffer's 'commentstring' (with fallbacks for common filetypes), same-line and
-multi-line block comments, and quoted strings with backslash escapes. A line
-containing both a string and a comment yields two virtual lines, in source
-order. Plain-text buffers (`text`, `markdown`, `help`, `rst`, `org`,
-`gitcommit`) have no comment syntax and translate every non-empty line
-instead. Related options: >
+Only comments and string literals are translated. With a Tree-sitter parser
+the nodes come from the syntax tree (heredocs, template literals, raw strings
+and injected languages work); without one a scanner based on 'commentstring'
+(with fallbacks for common filetypes) is used. A line containing both a
+string and a comment yields two virtual lines, in source order. Plain-text
+buffers (`text`, `markdown`, `help`, `rst`, `org`, `gitcommit`) have no
+comment syntax and translate every non-empty line instead. Related options: >
     inline = {
         max_lines = 200,   -- whole-buffer limit
-        concurrency = 4,   -- backend processes in flight
+        concurrency = 4,   -- backend concurrency for the batch
     },
 <
 Use |:TranslateVClear| to remove all virtual translations at once.

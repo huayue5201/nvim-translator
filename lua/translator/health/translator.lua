@@ -22,10 +22,7 @@ local function check_binary()
 		end
 	end
 
-	vim.health.error(
-		"Backend binary not found",
-		"Run `make build` in the plugin directory (requires Rust/cargo)."
-	)
+	vim.health.error("Backend binary not found", "Run `make build` in the plugin directory (requires Rust/cargo).")
 end
 
 ---------------------------------------------------------------------

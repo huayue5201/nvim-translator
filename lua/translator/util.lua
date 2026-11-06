@@ -339,6 +339,63 @@ function M.get_visual_selection()
 end
 
 ---------------------------------------------------------------------
+-- Blockwise selection cells
+---------------------------------------------------------------------
+--- Byte ranges of the last blockwise selection, one entry per line.
+--- `start_col` is 0-based and `end_col` is an exclusive 0-based byte offset,
+--- i.e. directly usable with nvim_buf_set_text(). Returns nil when the last
+--- visual selection was not blockwise or its marks are gone.
+---@return { line:integer, start_col:integer, end_col:integer, text:string }[]|nil
+function M.block_cells()
+	if vim.fn.visualmode() ~= "\22" or not vim.fn.getregionpos then
+		return nil
+	end
+
+	local s = vim.fn.getpos("'<")
+	local e = vim.fn.getpos("'>")
+	if s[2] == 0 or e[2] == 0 then
+		return nil
+	end
+
+	local ok, poss = pcall(vim.fn.getregionpos, s, e, { type = "\22" })
+	if not ok then
+		return nil
+	end
+
+	local cells = {}
+	for _, p in ipairs(poss) do
+		local lnum = p[1][2]
+		local line = vim.api.nvim_buf_get_lines(0, lnum - 1, lnum, false)[1] or ""
+		local start_col = math.min(p[1][3] - 1, #line)
+		local end_col = math.min(p[2][3] - 1, #line)
+		if end_col > start_col then
+			cells[#cells + 1] = {
+				line = lnum,
+				start_col = start_col,
+				end_col = end_col,
+				text = line:sub(start_col + 1, end_col),
+			}
+		end
+	end
+
+	return #cells > 0 and cells or nil
+end
+
+--- The first non-empty paraphrase in a backend response.
+---@param decoded table|nil
+---@return string|nil
+function M.paraphrase_of(decoded)
+	for _, t in ipairs((decoded or {}).results or {}) do
+		if type(t) == "table" and type(t.paraphrase) == "string" then
+			local text = vim.trim((t.paraphrase:gsub("[\r\n]+", " ")))
+			if text ~= "" then
+				return text
+			end
+		end
+	end
+end
+
+---------------------------------------------------------------------
 -- Extract text from the editing context: visual selection -> line range
 -- -> current line -> word under cursor.
 ---------------------------------------------------------------------

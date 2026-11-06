@@ -1,11 +1,10 @@
 -- File: lua/translator/targets.lua
--- Extract translatable "targets" (comments and string literals) from a line.
+-- Extract translatable segments (comments / string literals) from a buffer.
 --
--- This is a regex/byte-scanner fallback, not a full parser: it knows the
--- buffer's 'commentstring', a few extra comment leaders for common filetypes,
--- same-or-multi-line block comments and quoted strings with backslash escapes.
--- Good enough for comment translation; a Tree-sitter backend could replace it
--- later without changing the API.
+-- Tree-sitter is used whenever a parser is attached: it handles heredocs,
+-- template literals, raw strings and injected languages (Vue, Markdown code
+-- fences) correctly. Without a parser we fall back to a small byte scanner
+-- driven by 'commentstring' plus a per-filetype table of extras.
 
 local util = require("translator.util")
 
@@ -128,9 +127,9 @@ local function sort_longest(list)
 	return list
 end
 
---- Build (and cache) the target config for a buffer.
+--- Build (and cache) the fallback scanner config for a buffer.
 ---@param bufnr integer
----@return table { plain:boolean, line:string[], blocks:{open:string,close:string,kind:string}[], strings:boolean }
+---@return table
 function M.cfg(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	local ft = vim.bo[bufnr].filetype or ""
@@ -143,6 +142,7 @@ function M.cfg(bufnr)
 	if cs == "" then
 		cs = FALLBACK_CS[ft] or ""
 	end
+
 	local prefix, suffix = "", ""
 	if cs ~= "" then
 		local p, s = cs:match("^(.-)%%s(.-)$")
@@ -151,14 +151,12 @@ function M.cfg(bufnr)
 		end
 	end
 
-	local line = {}
-	local blocks = {}
-
+	local line, blocks = {}, {}
 	if prefix ~= "" then
 		if suffix == "" then
-			line[#line + 1] = prefix
+			line[1] = prefix
 		else
-			blocks[#blocks + 1] = { prefix, suffix, "comment" }
+			blocks[1] = { prefix, suffix, "comment" }
 		end
 	end
 
@@ -181,39 +179,25 @@ function M.cfg(bufnr)
 		return #a[1] > #b[1]
 	end)
 
-	local cfg = {
-		ft = ft,
-		cs = cs,
-		plain = PLAIN[ft] == true,
-		line = line,
-		blocks = blocks,
-		strings = true,
-	}
+	local cfg = { ft = ft, cs = cs, plain = PLAIN[ft] == true, line = line, blocks = blocks, strings = true }
 	cfgs[bufnr] = cfg
 	return cfg
 end
 
-function M.new_state()
-	return { block = nil, kind = nil }
-end
-
 --- True when every non-empty line of this filetype is translatable.
+---@param cfg table
+---@return boolean
 function M.plain(cfg)
 	return cfg.plain == true
 end
 
 local function add(segs, kind, raw)
 	local t = util.safe_trim(raw or "")
-	-- Block-comment continuation lines usually start with "*".
 	t = t:gsub("^%*+%s*", "")
-	if t == "" then
-		return
-	end
-	if not (util.has_cjk(t) or t:match("%a")) then
+	if t == "" or not (util.has_cjk(t) or t:match("%a")) then
 		return
 	end
 	if kind == "string" then
-		-- Skip one-byte char literals and tiny identifier-like values.
 		if #t < 2 then
 			return
 		end
@@ -248,18 +232,20 @@ local function match_at(line, i, pat)
 	return line:sub(i, i + #pat - 1) == pat
 end
 
---- Extract comment/string segments from one line.
+--- Scanner state carried across lines (open block comment).
+function M.new_state()
+	return { block = nil, kind = nil }
+end
+
+--- Extract comment/string segments from one line (fallback scanner).
 ---@param line string
----@param cfg table from M.cfg
----@param state table from M.new_state (block-comment carry-over)
+---@param cfg table
+---@param state table
 ---@return { text:string, kind:string }[]
 function M.line(line, cfg, state)
 	local segs = {}
-	state = state or M.new_state()
-
 	local i = 1
 
-	-- Finish a block comment opened on an earlier line.
 	if state.block then
 		local s, e = line:find(state.block, 1, true)
 		if s then
@@ -272,7 +258,6 @@ function M.line(line, cfg, state)
 		end
 	end
 
-	-- Shebang: never translate.
 	if i == 1 and line:sub(1, 2) == "#!" then
 		return segs
 	end
@@ -323,6 +308,141 @@ function M.line(line, cfg, state)
 	end
 
 	return segs
+end
+
+---------------------------------------------------------------------
+-- Tree-sitter
+---------------------------------------------------------------------
+local function kind_of(name)
+	if name:find("comment", 1, true) then
+		return "comment"
+	end
+	if name:find("string", 1, true) or name:find("heredoc", 1, true) or name:find("char_literal", 1, true) then
+		return "string"
+	end
+	return nil
+end
+
+--- Drop comment leaders / string delimiters from one segment line.
+local function clean(text, kind, first, last)
+	local t = util.safe_trim(text)
+	if kind == "comment" then
+		if first then
+			t = t:gsub("^[-/%#;%*!<>]+%s*", "")
+		end
+		if last then
+			t = t:gsub("%s*[-/%*<>]+$", "")
+		end
+		return (t:gsub("^%*+%s*", ""))
+	end
+	if first then
+		-- Lua long strings and raw-string prefixes: [[, r#" ...
+		t = t:gsub("^[%a]*#*%[=*%[", ""):gsub("^[%a]*#*[\"'`]", "")
+	end
+	if last then
+		t = t:gsub("%]=*%]$", ""):gsub("[\"'`]#?$", "")
+	end
+	return t
+end
+
+local function usable(t, kind)
+	if t == "" or not (util.has_cjk(t) or t:match("%a")) then
+		return false
+	end
+	return kind ~= "string" or #t >= 2
+end
+
+---@return table<integer, {text:string, kind:string}[]>|nil
+local function ts_scan(bufnr, first, last)
+	local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+	if not ok or not parser or type(parser.for_each_tree) ~= "function" then
+		return nil
+	end
+	if not pcall(parser.parse, parser) then
+		return nil
+	end
+
+	local out = {}
+
+	local function visit(node)
+		local kind = kind_of(node:type())
+		if kind then
+			local sr, er = node:range()
+			if er >= first - 1 and sr <= last - 1 then
+				local rows = vim.split(vim.treesitter.get_node_text(node, bufnr), "\n", { plain = true })
+				for i, row in ipairs(rows) do
+					local lnum = sr + i
+					if lnum >= first and lnum <= last then
+						local seg = clean(row, kind, i == 1, i == #rows)
+						if usable(seg, kind) then
+							out[lnum] = out[lnum] or {}
+							table.insert(out[lnum], { text = seg, kind = kind })
+						end
+					end
+				end
+			end
+			-- Nested nodes (e.g. string_content) would duplicate the segment.
+			return
+		end
+		for child in node:iter_children() do
+			if child:named() then
+				visit(child)
+			end
+		end
+	end
+
+	local walked = pcall(function()
+		parser:for_each_tree(function(tree)
+			visit(tree:root())
+		end)
+	end)
+	if not walked then
+		return nil
+	end
+	return out
+end
+
+local function fallback_scan(bufnr, first, last, cfg)
+	local lines = vim.api.nvim_buf_get_lines(bufnr, first - 1, last, false)
+	local state = M.new_state()
+	local out = {}
+	for i, line in ipairs(lines) do
+		local segs = M.line(line, cfg, state)
+		if #segs > 0 then
+			out[first + i - 1] = segs
+		end
+	end
+	return out
+end
+
+--- Collect translatable segments in a line range.
+---@param bufnr integer|nil
+---@param first integer|nil
+---@param last integer|nil
+---@return table<integer, {text:string, kind:string}[]>
+function M.scan(bufnr, first, last)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	local total = vim.api.nvim_buf_line_count(bufnr)
+	first = math.max(1, first or 1)
+	last = math.min(total, last or total)
+	if first > last then
+		return {}
+	end
+
+	local cfg = M.cfg(bufnr)
+	if cfg.plain then
+		local out = {}
+		local lines = vim.api.nvim_buf_get_lines(bufnr, first - 1, last, false)
+		for i, line in ipairs(lines) do
+			local t = util.safe_trim(line)
+			if t ~= "" and (util.has_cjk(t) or t:match("%a")) then
+				out[first + i - 1] = { { text = t, kind = "text" } }
+			end
+		end
+		return out
+	end
+
+	return ts_scan(bufnr, first, last) or fallback_scan(bufnr, first, last, cfg)
 end
 
 return M

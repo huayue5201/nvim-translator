@@ -102,14 +102,8 @@ function M.parse(opts)
 			options.target_lang = "zh"
 		end
 	else
-		options.source_lang = options.source_lang ~= ""
-				and options.source_lang
-			or config.get().source_lang
-			or "auto"
-		options.target_lang = options.target_lang ~= ""
-				and options.target_lang
-			or config.get().target_lang
-			or "zh"
+		options.source_lang = options.source_lang ~= "" and options.source_lang or config.get().source_lang or "auto"
+		options.target_lang = options.target_lang ~= "" and options.target_lang or config.get().target_lang or "zh"
 
 		-- Bang (!) swaps languages
 		if opts.bang then

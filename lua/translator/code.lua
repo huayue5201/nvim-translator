@@ -41,26 +41,57 @@ end
 ----------------------------------------------------------------------
 -- Tree-sitter: climb to the innermost enclosing function/container.
 ----------------------------------------------------------------------
-local function is_function_type(t)
-	if t:find("call", 1, true) or t:find("declarator", 1, true) or t:find("type", 1, true) then
-		return false
+-- Grammars name the same construct differently: `function_definition`,
+-- `function_declaration`, `function_item`, ... Strip the common suffixes and
+-- compare the remaining kind exactly (substring matching also hits
+-- `function_call` / `class_reference`).
+local FUNCTION_KINDS = {
+	["function"] = true,
+	method = true,
+	lambda = true,
+	closure = true,
+	constructor = true,
+	arrow_function = true,
+}
+
+local CONTAINER_KINDS = {
+	class = true,
+	struct = true,
+	interface = true,
+	impl = true,
+	trait = true,
+	enum = true,
+	module = true,
+	namespace = true,
+	union = true,
+	record = true,
+}
+
+local KIND_SUFFIXES = {
+	"_declaration",
+	"_definition",
+	"_expression",
+	"_statement",
+	"_specifier",
+	"_item",
+	"_spec",
+}
+
+local function base_kind(name)
+	for _, suffix in ipairs(KIND_SUFFIXES) do
+		if #name > #suffix and name:sub(-#suffix) == suffix then
+			return name:sub(1, #name - #suffix)
+		end
 	end
-	return t:find("function", 1, true) ~= nil
-		or t:find("method", 1, true) ~= nil
-		or t:find("lambda", 1, true) ~= nil
-		or t:find("closure", 1, true) ~= nil
-		or t:find("constructor", 1, true) ~= nil
+	return name
+end
+
+local function is_function_type(t)
+	return FUNCTION_KINDS[base_kind(t)] == true
 end
 
 local function is_container_type(t)
-	return t:find("class", 1, true) ~= nil
-		or t:find("struct", 1, true) ~= nil
-		or t:find("interface", 1, true) ~= nil
-		or t:find("impl", 1, true) ~= nil
-		or t:find("trait", 1, true) ~= nil
-		or t:find("enum", 1, true) ~= nil
-		or t:find("module", 1, true) ~= nil
-		or t:find("namespace", 1, true) ~= nil
+	return CONTAINER_KINDS[base_kind(t)] == true
 end
 
 local function ts_range(row, col)

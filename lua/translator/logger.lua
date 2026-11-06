@@ -6,13 +6,15 @@ local M = {}
 
 local LOG = {}
 
-local LOG_FILE = vim.fn.stdpath("data") .. "/translator/log.txt"
+local LOG_FILE = vim.fs.joinpath(vim.fn.stdpath("data"), "translator", "log.txt")
+local LOG_DIR = vim.fs.dirname(LOG_FILE)
 
 local function write_file(line)
 	if not config.get().debug then
 		return
 	end
 
+	vim.fn.mkdir(LOG_DIR, "p")
 	local f = io.open(LOG_FILE, "a")
 
 	if f then

@@ -5,15 +5,8 @@ local config = require("translator.config")
 
 local M = {}
 
-local function history_path()
-	local dir = vim.fn.stdpath("data") .. "/translator"
-	if vim.fn.isdirectory(dir) == 0 then
-		vim.fn.mkdir(dir, "p")
-	end
-	return dir .. "/history.txt"
-end
-
-local HISTORY = history_path()
+local HISTORY = vim.fs.joinpath(vim.fn.stdpath("data"), "translator", "history.txt")
+local HISTORY_DIR = vim.fs.dirname(HISTORY)
 
 ---------------------------------------------------------------------
 -- UTF-8 安全：按显示宽度截断，避免切断多字节字符产生非法字节
@@ -92,6 +85,7 @@ function M.save(trans)
 		end
 	end
 
+	vim.fn.mkdir(HISTORY_DIR, "p")
 	local f = io.open(HISTORY, "a")
 	if f then
 		f:write(entry .. "\n")

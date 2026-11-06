@@ -6,6 +6,7 @@ local binary = require("translator.binary")
 local util = require("translator.util")
 local state = require("translator.state")
 local config = require("translator.config")
+local proc = require("translator.proc")
 
 local M = {}
 
@@ -23,15 +24,12 @@ function M.speak(text, lang)
 	local engine = config.get().tts.engine
 	local cmd = { bin, "speak", "--text", text, "--lang", lang, "--engine", engine }
 
-	vim.fn.jobstart(cmd, {
-		stderr_buffered = true,
-		on_stderr = function(_, data)
-			local msg = table.concat(data or {}, "\n")
-			if msg ~= "" then
-				vim.notify("[translator] tts: " .. msg, vim.log.levels.ERROR)
-			end
-		end,
-	})
+	proc.spawn(cmd, {}, function(res)
+		local msg = vim.trim(res.stderr or "")
+		if msg ~= "" then
+			vim.notify("[translator] tts: " .. msg, vim.log.levels.ERROR)
+		end
+	end)
 end
 
 --- `:TranslateSay` speaks the source text; `:TranslateSay!` speaks the target.

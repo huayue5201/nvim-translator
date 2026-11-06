@@ -7,6 +7,7 @@
 --           从而释放常驻内存。
 
 local config = require("translator.config")
+local proc = require("translator.proc")
 
 local async = vim.async
 
@@ -28,17 +29,26 @@ end
 local function running(s)
 	local url = s.health
 	if url and url ~= "" then
-		local out = vim.fn.system({
-			"curl", "-s", "--max-time", "2", "-o", "/dev/null", "-w", "%{http_code}", url,
+		local res = async.run(proc.run, {
+			"curl",
+			"-s",
+			"--max-time",
+			"2",
+			"-o",
+			"/dev/null",
+			"-w",
+			"%{http_code}",
+			url,
 		})
-		return vim.trim(out) == "200"
+		return vim.trim(res.stdout) == "200"
 	end
 	-- 未配置 health 时按进程名判断
 	local name = s.cmd[1] or ""
 	if name == "" then
 		return false
 	end
-	return vim.fn.system({ "pgrep", "-f", name }):match("%d+") ~= nil
+	local res = async.run(proc.run, { "pgrep", "-f", name })
+	return res.code == 0 and vim.trim(res.stdout) ~= ""
 end
 
 --- 记录一次活跃（供外部 watchdog 判断空闲并回收）
@@ -47,8 +57,8 @@ function M.mark_active()
 	if not s then
 		return
 	end
-	local stamp = s.stamp or (vim.fn.stdpath("cache") .. "/translator/llm.last_active")
-	local dir = vim.fn.fnamemodify(stamp, ":h")
+	local stamp = s.stamp or vim.fs.joinpath(vim.fn.stdpath("cache"), "translator", "llm.last_active")
+	local dir = vim.fs.dirname(stamp)
 	if vim.fn.isdirectory(dir) == 0 then
 		vim.fn.mkdir(dir, "p")
 	end

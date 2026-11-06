@@ -201,12 +201,7 @@ local function build(lines, cfg, enter, win_cfg)
 			zindex = 100,
 		}, win_cfg)
 	)
-	vim.api.nvim_win_set_option(state_win.win, "winhl", "Normal:Translator")
-
-	-- 可选：设置浮窗永远不被其他窗口覆盖（需要 Neovim 0.9+）
-	pcall(vim.api.nvim_win_set_config, state_win.win, {
-		zindex = 100,
-	})
+	vim.wo[state_win.win].winhl = "Normal:Translator"
 
 	return state_win.win, bufnr
 end

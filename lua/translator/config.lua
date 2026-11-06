@@ -88,7 +88,7 @@ local defaults = {
 	incremental = true,
 	-- buffer 内虚拟文本中英对照（:TranslateV）：逐行请求后端并显示在源行下方。
 	-- max_lines 限制整篇翻译的最大行数（超出时请用可视选区）；
-	-- concurrency 为同时运行的后端进程数。
+	-- concurrency 为批量请求时后端进程的并发数。
 	inline = {
 		max_lines = 200,
 		concurrency = 4,

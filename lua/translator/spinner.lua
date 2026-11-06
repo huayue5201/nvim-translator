@@ -83,8 +83,10 @@ function M.start()
 	state.win = win
 
 	vim.api.nvim_set_hl(0, "TranslatorSpinner", { link = "Special" })
-	vim.api.nvim_win_set_option(state.win, "winhl", "Normal:TranslatorSpinner")
-	pcall(vim.api.nvim_win_set_option, state.win, "winblend", 60)
+	vim.wo[state.win].winhl = "Normal:TranslatorSpinner"
+	pcall(function()
+		vim.wo[state.win].winblend = 60
+	end)
 
 	state.frame = 1
 	local interval = config.get().spinner.interval or 80

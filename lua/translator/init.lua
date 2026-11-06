@@ -5,6 +5,9 @@ local logger = require("translator.logger")
 local job = require("translator.job")
 local cache = require("translator.cache")
 local config = require("translator.config")
+local action = require("translator.action")
+local batch = require("translator.batch")
+local util = require("translator.util")
 
 local M = {}
 
@@ -219,7 +222,71 @@ function M.start(displaymode, opts)
 		return
 	end
 
+	-- :TranslateR on a block selection replaces each line's cell separately.
+	if displaymode == "replace" then
+		options.block_cells = util.block_cells()
+	end
+
 	M.translate(options, displaymode)
+end
+
+--- Replace a blockwise selection cell by cell: the cells are sent to the
+--- backend as one batch and each translation replaces its own cell.
+local function replace_block(options, env, bin)
+	local pending, texts = {}, {}
+	local function apply(cell, key, decoded)
+		local text = util.paraphrase_of(decoded)
+		if not text then
+			return
+		end
+		if cache.has_content(decoded) then
+			cache.set(key, decoded)
+		end
+		action.replace_block(cell, text)
+	end
+
+	for _, cell in ipairs(options.block_cells) do
+		local key = cache.key({
+			text = cell.text,
+			engines = options.engines,
+			source_lang = options.source_lang,
+			target_lang = options.target_lang,
+		}, env)
+		local cached = (not options.force) and cache.get(key) or nil
+		if cached then
+			apply(cell, key, cached)
+		else
+			pending[#pending + 1] = { cell = cell, key = key }
+			texts[#texts + 1] = cell.text
+		end
+	end
+
+	if #pending == 0 then
+		return
+	end
+
+	batch.start(
+		bin,
+		env,
+		{
+			engines = options.engines,
+			source_lang = options.source_lang,
+			target_lang = options.target_lang,
+			proxy = config.get().proxy_url,
+		},
+		texts,
+		{
+			on_result = function(id, decoded)
+				local item = pending[id + 1]
+				if item then
+					apply(item.cell, item.key, decoded)
+				end
+			end,
+			on_error = function(message)
+				util.show_msg("Translation failed: " .. message, "error")
+			end,
+		}
+	)
 end
 
 function M.translate(options, displaymode)
@@ -229,6 +296,12 @@ function M.translate(options, displaymode)
 	end
 
 	local env = build_backend_env()
+
+	if options.block_cells and #options.block_cells > 1 then
+		replace_block(options, env, bin)
+		return
+	end
+
 	local key = cache.key(options, env)
 
 	-- 命中缓存：直接复用，不启动后端进程。
@@ -240,10 +313,12 @@ function M.translate(options, displaymode)
 		end
 	end
 
-	-- Build argv (no shell quoting needed; text is passed as a single element).
+	-- The text is piped over stdin: it stays out of `ps` and long selections
+	-- cannot exceed the argv size limit.
 	local cmd = {
 		bin,
 		"translate",
+		"--stdin",
 		"--target_lang",
 		options.target_lang,
 		"--source_lang",
@@ -258,12 +333,9 @@ function M.translate(options, displaymode)
 		table.insert(cmd, proxy)
 	end
 
-	-- Text last, so it can never be mistaken for an option value.
-	table.insert(cmd, options.text)
+	logger.log(table.concat(cmd, " ") .. " (text: " .. #options.text .. " bytes)")
 
-	logger.log(table.concat(cmd, " "))
-
-	job.jobstart(cmd, displaymode, env, options, key)
+	job.jobstart(cmd, options.text, displaymode, env, options, key)
 end
 
 ---------------------------------------------------------------------
@@ -319,9 +391,7 @@ function M.explain(opts)
 	local target = config.get().target_lang or "zh"
 
 	local extra = vim.trim(opts.args or "")
-	local args = "--engines=explain --source_lang=" .. lang
-		.. " --target_lang=" .. target
-		.. " --no-bilingual --raw"
+	local args = "--engines=explain --source_lang=" .. lang .. " --target_lang=" .. target .. " --no-bilingual --raw"
 	if extra ~= "" then
 		args = args .. " " .. extra
 	end

@@ -8,7 +8,7 @@ Python required); Neovim talks to it via `jobstart` using an
 
 ## Requirements
 
-- Neovim 0.8+ (0.10+ recommended; TTS and Anki features need 0.10+)
+- Neovim 0.13+ (uses |vim.async| and |vim.system()|)
 - Rust toolchain (`cargo`) — only needed once, to build the backend binary
 - `curl` — for the Anki feature (bundled with macOS/Linux)
 
@@ -40,7 +40,7 @@ make build
 | ----------------- | ------------------------------------------------------- |
 | `:Translate` | Translate the word / selection / text in a floating window |
 | `:TranslateW` | Show translation in a floating window |
-| `:TranslateR` | Replace the visual selection with the translation |
+| `:TranslateR` | Replace the visual selection with the translation (block selections are replaced cell by cell) |
 | `:TranslateX` | Translate the `*` (system clipboard) register |
 | `:TranslateI` | Prompt for text, then translate it (interactive) |
 | `:TranslateApi` | Translate a code API symbol with its documentation |
@@ -167,21 +167,24 @@ modified, so editing, undo and syntax highlighting stay untouched:
 ```
 
 **Only comments and string literals are translated** — code lines are left
-alone. Detection uses the buffer's 'commentstring' (with built-in fallbacks
-for common filetypes), same-line and multi-line block comments, and quoted
-strings with backslash escapes. A line with both a string and a trailing
-comment produces two virtual lines, in source order. Plain-text buffers
-(`text`, `markdown`, `help`, `rst`, `org`, `gitcommit`) have no comment
-syntax and translate every non-empty line instead.
+alone. When a Tree-sitter parser is available the nodes are taken from the
+syntax tree (so heredocs, template literals, raw strings and injected
+languages such as Vue or Markdown code fences work); otherwise a scanner
+using the buffer's 'commentstring' plus built-in fallbacks takes over. A
+line with both a string and a trailing comment produces two virtual lines,
+in source order. Plain-text buffers (`text`, `markdown`, `help`, `rst`,
+`org`, `gitcommit`) have no comment syntax and translate every non-empty
+line instead.
 
-Lines are translated in parallel (`inline.concurrency`, default 4), cache
-hits render instantly, and blank / symbol-only lines are skipped. The
-virtual line keeps the source line's indentation.
+All lines are sent to the backend as one batch (`inline.concurrency`
+controls its parallelism); cache hits render instantly and blank /
+symbol-only lines are skipped. The virtual line keeps the source line's
+indentation, and editing the buffer re-translates it after a short debounce.
 
 ```lua
 inline = {
     max_lines = 200,   -- whole-buffer limit
-    concurrency = 4,   -- backend processes in flight
+    concurrency = 4,   -- backend concurrency for the batch
 },
 ```
 

@@ -242,4 +242,13 @@ function M.replace(trans)
 	vim.api.nvim_buf_set_text(0, srow, scol, erow, ecol + 1, lines)
 end
 
+--- Translate a blockwise selection cell by cell and replace each cell in
+--- place (byte columns from `getregionpos`).
+---@param cell { line:integer, start_col:integer, end_col:integer }
+---@param text string
+function M.replace_block(cell, text)
+	text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
+	vim.api.nvim_buf_set_text(0, cell.line - 1, cell.start_col, cell.line - 1, cell.end_col, vim.split(text, "\n"))
+end
+
 return M

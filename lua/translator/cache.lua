@@ -14,12 +14,14 @@ local config = require("translator.config")
 local DEFAULT_TTL = 7 * 24 * 60 * 60 -- 7 天
 local MAX_ENTRIES = 500
 
+local SAVE_DELAY = 1000 -- ms
+
 local function cache_path()
-	local dir = vim.fn.stdpath("data") .. "/translator"
+	local dir = vim.fs.joinpath(vim.fn.stdpath("data"), "translator")
 	if vim.fn.isdirectory(dir) == 0 then
 		vim.fn.mkdir(dir, "p")
 	end
-	return dir .. "/cache.json"
+	return vim.fs.joinpath(dir, "cache.json")
 end
 
 local CACHE = cache_path()
@@ -40,13 +42,46 @@ local function load()
 	return store
 end
 
-local function save()
-	local f = io.open(CACHE, "w")
+local save_timer = nil
+local flush_augroup = nil
+
+--- Write the cache atomically (tmp file + rename).
+function M.flush()
+	if save_timer then
+		save_timer:stop()
+		save_timer:close()
+		save_timer = nil
+	end
+
+	local tmp = CACHE .. ".tmp"
+	local f = io.open(tmp, "w")
 	if not f then
 		return
 	end
-	f:write(vim.json.encode(load()))
+	local ok = pcall(f.write, f, vim.json.encode(load()))
 	f:close()
+	if ok then
+		os.rename(tmp, CACHE)
+	end
+end
+
+-- Debounced: translations arrive in bursts (buffered buffer, streamed engines).
+local function save()
+	if not flush_augroup then
+		flush_augroup = vim.api.nvim_create_augroup("translator_cache", { clear = true })
+		vim.api.nvim_create_autocmd("VimLeavePre", {
+			group = flush_augroup,
+			callback = function()
+				M.flush()
+			end,
+		})
+	end
+
+	save_timer = save_timer or vim.uv.new_timer()
+	save_timer:stop()
+	save_timer:start(SAVE_DELAY, 0, function()
+		vim.schedule(M.flush)
+	end)
 end
 
 local function ttl()
@@ -112,9 +147,11 @@ function M.has_content(translations)
 	end
 	for _, t in ipairs(results) do
 		if type(t) == "table" then
-			if (type(t.paraphrase) == "string" and t.paraphrase ~= "")
+			if
+				(type(t.paraphrase) == "string" and t.paraphrase ~= "")
 				or (type(t.explains) == "table" and #t.explains > 0)
-				or (type(t.phonetic) == "string" and t.phonetic ~= "") then
+				or (type(t.phonetic) == "string" and t.phonetic ~= "")
+			then
 				return true
 			end
 		end

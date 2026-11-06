@@ -7,7 +7,7 @@
 
 ## 环境要求
 
-- Neovim 0.8+(推荐 0.10+;TTS 和 Anki 功能需要 0.10+)
+- Neovim 0.13+(使用 |vim.async| 与 |vim.system()|)
 - Rust 工具链(`cargo`)—— 仅首次构建后端二进制时需要
 - `curl` —— Anki 功能需要(macOS/Linux 自带)
 
@@ -38,7 +38,7 @@ make build
 | ----------------- | ------------------------------------------------------- |
 | `:Translate` | 浮窗显示翻译(词 / 选区 / 文本) |
 | `:TranslateW` | 在浮动窗口中显示翻译 |
-| `:TranslateR` | 用译文替换可视选区 |
+| `:TranslateR` | 用译文替换可视选区(块选区逐格替换) |
 | `:TranslateX` | 翻译 `*`(系统剪贴板)寄存器 |
 | `:TranslateI` | 交互式输入文本后翻译 |
 | `:TranslateApi` | 翻译代码 API 符号及其文档 |
@@ -154,19 +154,22 @@ vim.g.translator_bilingual = true
 :TranslateVClear       " 清除所有 buffer 的虚拟译文
 ```
 
-**只翻译注释和字符串字面量**,代码行不动:识别基于 buffer 的
-`commentstring`(常见文件类型有内置回退)、单行/多行块注释以及带转义的引号
-字符串。同一行既有字符串又有行尾注释时,会按源码顺序生成两条虚拟译文。
-纯文本类 buffer(`text`、`markdown`、`help`、`rst`、`org`、`gitcommit`)
-没有注释语法,改为逐行翻译非空行。
+**只翻译注释和字符串字面量**,代码行不动:有 Tree-sitter parser 时直接取
+语法树里的 comment/string 节点(heredoc、模板字符串、raw string、Vue 或
+Markdown 代码块里的注入语言都能识别);没有 parser 时回退到基于
+`commentstring` 的扫描器(常见文件类型有内置回退)。同一行既有字符串又有
+行尾注释时,会按源码顺序生成两条虚拟译文。纯文本类 buffer(`text`、
+`markdown`、`help`、`rst`、`org`、`gitcommit`)没有注释语法,改为逐行
+翻译非空行。
 
-逐行并行请求后端(`inline.concurrency`,默认 4),命中缓存的行即时显示;
-空白行与纯符号行会跳过。译文缩进与源行一致,长行由虚拟文本自行折行。
+所有行合并成一个批量请求发给后端(`inline.concurrency` 控制其并发度);
+命中缓存的行即时显示,空白行与纯符号行会跳过。译文缩进与源行一致,
+编辑 buffer 后会防抖重译。
 
 ```lua
 inline = {
     max_lines = 200,   -- 整篇翻译的最大行数
-    concurrency = 4,   -- 同时运行的后端进程数
+    concurrency = 4,   -- 批量请求的后端并发数
 },
 ```
 

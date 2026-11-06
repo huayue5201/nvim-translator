@@ -1,5 +1,6 @@
-use std::io::Write;
-use std::sync::Arc;
+use std::io::{Read, Write};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use clap::{Args, Parser, Subcommand};
@@ -48,9 +49,23 @@ struct TranslateArgs {
     #[arg(long)]
     stream: bool,
 
-    /// Text to translate. Passed as a single argv element, may contain spaces.
+    /// Read the text from stdin instead of argv (avoids leaking it into `ps`
+    /// and the ARG_MAX limit for long selections).
+    #[arg(long)]
+    stdin: bool,
+
+    /// Batch mode: stdin holds one text per line; one JSON object per text is
+    /// printed, carrying its 0-based line index as `id`.
+    #[arg(long)]
+    batch: bool,
+
+    /// Number of concurrent texts in batch mode.
+    #[arg(long, default_value_t = 8)]
+    concurrency: usize,
+
+    /// Text to translate. May contain spaces.
     #[arg(value_name = "TEXT", allow_hyphen_values = true)]
-    text: String,
+    text: Option<String>,
 }
 
 #[derive(Args)]
@@ -92,6 +107,21 @@ struct Output {
     results: Vec<Translation>,
 }
 
+#[derive(Serialize)]
+struct BatchOutput {
+    id: usize,
+    text: String,
+    results: Vec<Translation>,
+}
+
+fn read_stdin() -> String {
+    let mut buf = String::new();
+    if std::io::stdin().read_to_string(&mut buf).is_err() {
+        return String::new();
+    }
+    buf
+}
+
 fn build_client(proxy: Option<&str>) -> reqwest::blocking::Client {
     let mut builder = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -115,35 +145,56 @@ fn build_client(proxy: Option<&str>) -> reqwest::blocking::Client {
     }
 }
 
-fn run_translate(args: TranslateArgs) {
-    let client = Arc::new(build_client(args.proxy.as_deref()));
-    let text = args.text.trim().to_string();
-
-    if args.stream {
-        return run_translate_stream(&args, client, text);
-    }
-
+/// Run every configured engine in parallel and collect the results.
+fn translate_all(
+    client: &Arc<reqwest::blocking::Client>,
+    args: &TranslateArgs,
+    text: &str,
+) -> Vec<Translation> {
     let handles: Vec<_> = args
         .engines
         .iter()
         .map(|engine| {
             let engine = engine.clone();
-            let client = Arc::clone(&client);
+            let client = Arc::clone(client);
             let sl = args.source_lang.clone();
             let tl = args.target_lang.clone();
-            let text = text.clone();
+            let text = text.to_string();
             thread::spawn(move || engines::translate(&client, &engine, &sl, &tl, &text))
         })
         .collect();
 
-    let mut results: Vec<Translation> = Vec::with_capacity(handles.len());
-    for handle in handles {
-        match handle.join() {
-            Ok(t) => results.push(t),
-            Err(_) => results.push(Translation::default()),
-        }
+    handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap_or_default())
+        .collect()
+}
+
+fn run_translate(args: TranslateArgs) {
+    let client = Arc::new(build_client(args.proxy.as_deref()));
+
+    if args.batch {
+        return run_batch(&args, client);
     }
 
+    let text = match args
+        .text
+        .clone()
+        .or_else(|| args.stdin.then(read_stdin))
+        .map(|t| t.trim().to_string())
+    {
+        Some(t) if !t.is_empty() => t,
+        _ => {
+            eprintln!("no text to translate (pass TEXT, --stdin or --batch)");
+            std::process::exit(2);
+        }
+    };
+
+    if args.stream {
+        return run_translate_stream(&args, client, text);
+    }
+
+    let results = translate_all(&client, &args, &text);
     let output = Output {
         text,
         status: 1,
@@ -192,6 +243,49 @@ fn run_translate_stream(args: &TranslateArgs, client: Arc<reqwest::blocking::Cli
     }
     let _ = writeln!(lock, "{{\"done\":true}}");
     let _ = lock.flush();
+}
+
+/// Batch mode: one text per stdin line, one JSON object per text on stdout.
+/// `id` is the 0-based line index, so the caller can map results back even
+/// though they arrive out of order.
+fn run_batch(args: &TranslateArgs, client: Arc<reqwest::blocking::Client>) {
+    let input = read_stdin();
+    let texts: Vec<String> = input
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r').trim().to_string())
+        .collect();
+    let total = texts.len();
+    if total == 0 {
+        return;
+    }
+
+    let next = AtomicUsize::new(0);
+    let stdout = Mutex::new(std::io::stdout());
+    let workers = args.concurrency.clamp(1, total);
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, Ordering::SeqCst);
+                if i >= total {
+                    break;
+                }
+                if texts[i].is_empty() {
+                    continue;
+                }
+                let out = BatchOutput {
+                    id: i,
+                    text: texts[i].clone(),
+                    results: translate_all(&client, args, &texts[i]),
+                };
+                if let Ok(line) = serde_json::to_string(&out) {
+                    let mut lock = stdout.lock().unwrap();
+                    let _ = writeln!(lock, "{}", line);
+                    let _ = lock.flush();
+                }
+            });
+        }
+    });
 }
 
 fn main() {

@@ -6,6 +6,9 @@
 local util = require("translator.util")
 local state = require("translator.state")
 local config_mod = require("translator.config")
+local proc = require("translator.proc")
+
+local async = vim.async
 
 local M = {}
 
@@ -17,7 +20,7 @@ end
 local function request(action, params)
 	local cfg = config()
 	local body = vim.json.encode({ action = action, version = 6, params = params })
-	local out = vim.fn.system({
+	local res = async.run(proc.run, {
 		"curl",
 		"-s",
 		"-m",
@@ -29,11 +32,11 @@ local function request(action, params)
 		body,
 	})
 
-	if vim.v.shell_error ~= 0 then
+	if res.code ~= 0 then
 		return nil, "AnkiConnect 不可达：请确认 Anki 正在运行，且已安装 AnkiConnect 插件"
 	end
 
-	local ok, resp = pcall(vim.json.decode, out)
+	local ok, resp = pcall(vim.json.decode, res.stdout)
 	if not ok then
 		return nil, "AnkiConnect 响应解析失败"
 	end
@@ -176,7 +179,7 @@ function M.add()
 	require("translator.ui.fields").open({
 		fields = fields,
 		on_submit = function(result)
-			submit(result)
+			async.run(submit, result)
 		end,
 	})
 end

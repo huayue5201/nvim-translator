@@ -42,7 +42,7 @@ function M.create(lines, cfg)
 		zindex = 40,
 	})
 
-	vim.api.nvim_win_set_option(state.win, "winhl", "Normal:TranslatorPreview")
+	vim.wo[state.win].winhl = "Normal:TranslatorPreview"
 
 	-------------------------------------------------------------------
 	-- Auto-close (same as float.lua)

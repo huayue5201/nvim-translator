@@ -9,6 +9,7 @@ local cache = require("translator.cache")
 local config = require("translator.config")
 local spinner = require("translator.spinner")
 local llm_server = require("translator.llm_server")
+local proc = require("translator.proc")
 
 local async = vim.async
 
@@ -88,54 +89,15 @@ local function commit_result(translations, options)
 	llm_server.mark_active()
 end
 
----------------------------------------------------------------------
--- Run one backend request; returns (stdout[], stderr[]) when the job exits.
+---------------------------------------------------------------------------------------------------------------------------------------
+-- Run one backend request; returns (stdout, stderr) when the job exits.
 --
--- The await callback returns a closable handle so that cancelling the
--- surrounding task aborts the child process instead of leaking it.
+-- Text travels over stdin so it never shows up in `ps` and long selections
+-- cannot hit the argv size limit.
 ---------------------------------------------------------------------
-local function spawn(cmd, env)
-	return async.await(function(done)
-		local stdout, stderr = {}, {}
-
-		local opts = {
-			stdout_buffered = true,
-			stderr_buffered = true,
-			on_stdout = function(_, data)
-				stdout = data or {}
-			end,
-			on_stderr = function(_, data)
-				stderr = data or {}
-			end,
-			on_exit = function()
-				-- on_exit 是 luv（快速事件）回调；必须切回主循环再唤醒任务，
-				-- 否则 await 之下的 UI 调用会报 E5560 fast event context。
-				-- 顺带给缓冲的 on_stdout/on_stderr 一个先送达的机会。
-				local out, err = stdout, stderr
-				vim.schedule(function()
-					done(out, err)
-				end)
-			end,
-		}
-		if env then
-			opts.env = env
-		end
-
-		local id = vim.fn.jobstart(cmd, opts)
-		if id <= 0 then
-			done({}, { "failed to start translation backend" })
-			return nil
-		end
-
-		return {
-			close = function(_, callback)
-				pcall(vim.fn.jobstop, id)
-				if callback then
-					callback()
-				end
-			end,
-		}
-	end)
+local function spawn(cmd, env, stdin)
+	local res = proc.run(cmd, { env = env, stdin = stdin })
+	return res.stdout, res.stderr
 end
 
 ---------------------------------------------------------------------
@@ -143,61 +105,53 @@ end
 -- `on_line` is called (on the main loop) for each complete line; the
 -- await resolves with stderr when the process exits.
 ---------------------------------------------------------------------
-local function spawn_stream(cmd, env, on_line)
+local function spawn_stream(cmd, env, stdin, on_line)
 	return async.await(function(done)
-		local stderr = {}
 		local line_buf = ""
 		local stopped = false
 
-		local opts = {
-			stderr_buffered = true,
-			on_stdout = function(_, data)
-				if stopped then
-					return
+		local function feed(chunk)
+			line_buf = line_buf .. chunk
+			while true do
+				local nl = line_buf:find("\n", 1, true)
+				if not nl then
+					break
 				end
-				line_buf = line_buf .. table.concat(data or {}, "\n")
-				while true do
-					local nl = line_buf:find("\n", 1, true)
-					if not nl then
-						break
-					end
-					local line = line_buf:sub(1, nl - 1)
-					line_buf = line_buf:sub(nl + 1)
-					if line ~= "" then
-						vim.schedule(function()
-							on_line(line)
-						end)
-					end
+				local line = line_buf:sub(1, nl - 1)
+				line_buf = line_buf:sub(nl + 1)
+				if line ~= "" then
+					on_line(line)
 				end
-			end,
-			on_stderr = function(_, data)
-				stderr = data or {}
-			end,
-			on_exit = function()
-				local err = stderr
-				vim.schedule(function()
-					if not stopped and line_buf ~= "" then
-						on_line(line_buf)
-						line_buf = ""
-					end
-					done(err)
-				end)
-			end,
-		}
-		if env then
-			opts.env = env
+			end
 		end
 
-		local id = vim.fn.jobstart(cmd, opts)
-		if id <= 0 then
-			done({ "failed to start translation backend" })
-			return nil
-		end
+		local system = vim.system(cmd, {
+			env = env,
+			stdin = stdin,
+			text = true,
+			[proc.STDOUT_KEY] = function(_, data)
+				if data and not stopped then
+					vim.schedule(function()
+						if not stopped then
+							feed(data)
+						end
+					end)
+				end
+			end,
+		}, function(res)
+			vim.schedule(function()
+				if not stopped and line_buf ~= "" then
+					on_line(line_buf)
+					line_buf = ""
+				end
+				done(vim.trim(res.stderr or ""))
+			end)
+		end)
 
 		return {
 			close = function(_, callback)
 				stopped = true
-				pcall(vim.fn.jobstop, id)
+				pcall(system.kill, system, 15)
 				if callback then
 					callback()
 				end
@@ -281,7 +235,7 @@ end
 ---------------------------------------------------------------------
 -- Start one translation, cancelling any request already in flight.
 ---------------------------------------------------------------------
-function M.jobstart(cmd, displaymode, env, options, key)
+function M.jobstart(cmd, stdin, displaymode, env, options, key)
 	if translate_task then
 		translate_task:close()
 	end
@@ -349,7 +303,7 @@ function M.jobstart(cmd, displaymode, env, options, key)
 				end
 			end
 
-			local job = async.run(spawn_stream, cmd, env, on_line)
+			local job = async.run(spawn_stream, cmd, env, stdin, on_line)
 
 			local timeout = config.get().request_timeout
 			local ok, stderr
@@ -396,7 +350,7 @@ function M.jobstart(cmd, displaymode, env, options, key)
 		end
 
 		-- ===== buffered mode =====
-		local job = async.run(spawn, cmd, env)
+		local job = async.run(spawn, cmd, env, stdin)
 
 		local timeout = config.get().request_timeout
 		local ok, stdout, stderr
@@ -423,11 +377,11 @@ function M.jobstart(cmd, displaymode, env, options, key)
 			return
 		end
 
-		local out = util.safe_trim(table.concat(stdout or {}, "\n"))
+		local out = util.safe_trim(stdout or "")
 		if out ~= "" then
 			handle_stdout(displaymode, options, key, out)
 		else
-			handle_stderr(displaymode, util.safe_trim(table.concat(stderr or {}, "\n")))
+			handle_stderr(displaymode, util.safe_trim(stderr or ""))
 		end
 	end)
 	translate_task = my_task
