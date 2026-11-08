@@ -33,12 +33,12 @@ local function request(action, params)
 	}))
 
 	if res.code ~= 0 then
-		return nil, "AnkiConnect 不可达：请确认 Anki 正在运行，且已安装 AnkiConnect 插件"
+		return nil, "AnkiConnect unreachable: make sure Anki is running and the AnkiConnect add-on is installed"
 	end
 
 	local ok, resp = pcall(vim.json.decode, res.stdout)
 	if not ok then
-		return nil, "AnkiConnect 响应解析失败"
+		return nil, "Failed to parse AnkiConnect response"
 	end
 	-- vim.json.decode maps JSON null to vim.NIL; treat that as "no error".
 	if resp.error and resp.error ~= vim.NIL then
@@ -135,27 +135,27 @@ local function submit(fields)
 
 	local _, err = ensure_deck(cfg.deck)
 	if err then
-		util.show_msg("创建牌组失败：" .. err, "error")
+		util.show_msg("Failed to create deck: " .. err, "error")
 		return
 	end
 
 	local _, err2 = ensure_model(cfg.model)
 	if err2 then
-		util.show_msg("创建笔记模板失败：" .. err2, "error")
+		util.show_msg("Failed to create note type: " .. err2, "error")
 		return
 	end
 
 	local note = build_note(fields, cfg)
 	local result, err3 = request("addNote", { note = note })
 	if err3 then
-		util.show_msg("添加到 Anki 失败：" .. err3, "error")
+		util.show_msg("Failed to add to Anki: " .. err3, "error")
 		return
 	end
 
 	if result == nil then
-		util.show_msg("已存在，跳过：" .. note.fields.Front, "warning")
+		util.show_msg("Already exists, skipped: " .. note.fields.Front, "warning")
 	else
-		util.show_msg("已添加到 Anki：" .. note.fields.Front)
+		util.show_msg("Added to Anki: " .. note.fields.Front)
 	end
 end
 
@@ -163,17 +163,17 @@ end
 function M.add()
 	local s = state.get()
 	if not s or not s.trans or not s.trans.text or s.trans.text == "" then
-		util.show_msg("没有可添加的翻译（先翻译一次）", "warning")
+		util.show_msg("No translation to add (translate first)", "warning")
 		return
 	end
 
 	local defaults = default_fields(s.trans)
 
 	local fields = {
-		{ key = "Front", label = "原文", value = defaults.Front },
-		{ key = "Back", label = "译文", value = defaults.Back },
-		{ key = "Phonetic", label = "音标", value = defaults.Phonetic },
-		{ key = "Example", label = "例句", value = defaults.Example },
+		{ key = "Front", label = "Original", value = defaults.Front },
+		{ key = "Back", label = "Translation", value = defaults.Back },
+		{ key = "Phonetic", label = "Phonetic", value = defaults.Phonetic },
+		{ key = "Example", label = "Example", value = defaults.Example },
 	}
 
 	require("translator.ui.fields").open({

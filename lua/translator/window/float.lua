@@ -53,7 +53,7 @@ local function copy_paraphrase()
 	if p ~= "" then
 		vim.fn.setreg("+", p)
 		vim.fn.setreg('"', p)
-		util.show_msg("已复制译文：" .. p)
+		util.show_msg("Copied translation: " .. p)
 	end
 end
 
@@ -130,15 +130,15 @@ end
 local function footer()
 	return {
 		{ "s", "Special" },
-		{ " 原文  ", "FloatFooter" },
+		{ " Text ", "FloatFooter" },
 		{ "S", "Special" },
-		{ " 译文  ", "FloatFooter" },
+		{ " Result ", "FloatFooter" },
 		{ "a", "Special" },
 		{ " Anki  ", "FloatFooter" },
 		{ "y", "Special" },
-		{ " 复制  ", "FloatFooter" },
+		{ " Copy ", "FloatFooter" },
 		{ "Esc", "Special" },
-		{ " 关闭", "FloatFooter" },
+		{ " Close", "FloatFooter" },
 	}
 end
 

@@ -39,7 +39,7 @@ function M.say(bang, opts)
 	if bang then
 		local paraphrase = state.paraphrase()
 		if paraphrase == "" then
-			util.show_msg("没有可朗诵的译文（先翻译一次）", "warning")
+			util.show_msg("No translation to speak (translate first)", "warning")
 			return
 		end
 		M.speak(paraphrase, state.get().options.target_lang)
@@ -58,7 +58,7 @@ function M.say(bang, opts)
 
 		text = util.text_proc(text)
 		if text == "" then
-			util.show_msg("没有可朗诵的文本", "warning")
+			util.show_msg("No text to speak", "warning")
 			return
 		end
 

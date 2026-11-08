@@ -132,14 +132,14 @@ local function build_window_content(trans, options)
 				table.insert(out, MARK .. trimmed)
 			end
 		elseif t.pending then
-			table.insert(out, MARK .. "翻译中…")
+			table.insert(out, MARK .. "Translating…")
 		elseif t.error and t.error ~= "" then
 			-- 后端给出了具体失败原因（超时 / HTTP 401 / 网络错误…），直接展示。
 			for line in tostring(t.error):gmatch("[^\r\n]+") do
 				table.insert(out, MARK .. util.safe_trim(line))
 			end
 		else
-			table.insert(out, MARK .. "无结果")
+			table.insert(out, MARK .. "No result")
 		end
 	end
 
@@ -147,7 +147,7 @@ local function build_window_content(trans, options)
 	-- 随着结果逐个到达，该行数字递减，全部返回后消失。
 	if trans.pending_count and trans.pending_count > 0 then
 		table.insert(out, "")
-		table.insert(out, "⏳ 还有 " .. trans.pending_count .. " 个翻译中…")
+		table.insert(out, "⏳ " .. trans.pending_count .. " translation(s) still in progress…")
 	end
 
 	return out

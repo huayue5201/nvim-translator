@@ -242,7 +242,7 @@ function M.translate(opts)
 	if (opts.range or 0) == 0 and #lines > max_lines then
 		util.show_msg(
 			string.format(
-				"缓冲区有 %d 行，超过上限 %d；请先用可视选区指定范围",
+				"Buffer has %d lines, exceeding the limit of %d; select a range in visual mode first",
 				#lines,
 				max_lines
 			),
@@ -304,8 +304,8 @@ function M.translate(opts)
 
 	if #items == 0 then
 		sessions[bufnr] = nil
-		local why = targets.plain(targets.cfg(bufnr)) and "没有可翻译的文本行"
-			or "未发现可翻译的注释或字符串"
+		local why = targets.plain(targets.cfg(bufnr)) and "No lines of text to translate"
+			or "No translatable comments or strings found"
 		util.show_msg(why, "warning")
 		return
 	end
@@ -393,7 +393,7 @@ function M.translate(opts)
 					return
 				end
 				sess.warned = true
-				util.show_msg("虚拟翻译失败：" .. message, "error")
+				util.show_msg("Virtual translation failed: " .. message, "error")
 			end,
 		}
 	)
