@@ -52,8 +52,9 @@ make build
 | `:TranslateTtsServer` | 启动本地神经 TTS 服务(`!` = 停止) |
 | `:TranslateA` | 把上次翻译加入 Anki(通过 AnkiConnect) |
 | `:TranslateCancel` | 中断正在进行的翻译请求 |
-| `:TranslateH` | 打开翻译历史 |
+| `:TranslateH` | 打开翻译历史文件(需 `history.enable`) |
 | `:TranslateL` | 打开调试日志 |
+| `:TranslateCacheClear` | 清空翻译缓存 |
 
 文本来源优先级:
 
@@ -92,7 +93,8 @@ make build
 :Translate --target_lang=en --source_lang=zh 你好
 ```
 
-末尾的 `!` 会交换源/目标语言。它仅在显式指定语言时生效;自动方向下插件已经
+末尾的 `!` 会为 `:Translate`、`:TranslateW`、`:TranslateR`、`:TranslateX`、
+`:TranslateI` 交换源/目标语言。它仅在显式指定语言时生效;自动方向下插件已经
 会为你选择正确方向。
 
 ### 自动方向(双语自动互翻)
@@ -104,7 +106,8 @@ make build
 :Translate 你好      " zh -> en
 ```
 
-- 包含 CJK(中文 / 假名 / 谚文)→ `zh → en`
+- 包含韩文(谚文)→ `ko → en`;日文(假名)→ `ja → en`;
+  中文(汉字)→ `zh → en`
 - 否则 → `auto → zh`
 
 显式 `--source_lang` / `--target_lang` 会覆盖自动检测:
@@ -141,7 +144,7 @@ make build
 全局开启:
 
 ```lua
-vim.g.translator_bilingual = true
+require("translator").setup({ bilingual = true })
 ```
 
 也可用 `--bilingual` / `--no-bilingual` 在单次调用中覆盖。
@@ -544,6 +547,10 @@ require("translator").setup({
 PowerShell `SoundPlayer`(Windows)。长文本按批次生成,播放当前批次时会预取
 下一批。
 
+`tts.server_cmd` / `tts.server_env` 可覆盖 `:TranslateTtsServer` 启动服务所用的
+命令与环境变量;`tts.hf_mirror`(默认 `true`)会在未设置 `HF_ENDPOINT` 时把
+Hugging Face 下载指向 `https://hf-mirror.com`。
+
 示例按键映射:
 
 ```lua
@@ -600,9 +607,13 @@ vim.keymap.set("n", "<localLeader>tla", "<Cmd>TranslateA<CR>", { desc = "加入 
 ### Anki 配置
 
 ```lua
-vim.g.translator_anki_port = 8765      -- AnkiConnect 端口
-vim.g.translator_anki_deck = "翻译"    -- 牌组名(自动创建)
-vim.g.translator_anki_model = "translator" -- 笔记类型(自动创建)
+require("translator").setup({
+    anki = {
+        port = 8765,          -- AnkiConnect 端口
+        deck = "翻译",        -- 牌组名(自动创建)
+        model = "translator", -- 笔记类型(自动创建)
+    },
+})
 ```
 
 ## 配置
@@ -612,7 +623,8 @@ require("translator").setup({
     source_lang = "auto",                  -- 默认源语言
     target_lang = "zh",                    -- 默认目标语言
     bilingual = false,                     -- 逐句对照显示
-    engines = { "google", "youdao" },      -- 默认引擎
+    engines = nil,                         -- nil = 按 target_lang 推导:
+                                           --   zh → bing,google,haici,youdao;否则 google
     proxy_url = "",                        -- 例如 "socks5://127.0.0.1:1080"
     request_timeout = 15000,               -- 后端请求超时(毫秒);<=0 不限制
     debug = false,                         -- 写入日志到数据目录
@@ -635,7 +647,7 @@ require("translator").setup({
         enable = true,                     -- 缓存相同翻译结果
         ttl = 7 * 24 * 60 * 60,            -- 过期时间(秒);0 = 永不过期
     },
-    history = { enable = true },           -- 持久化历史
+    history = { enable = false },          -- 持久化历史(默认关闭)
     spinner = { enable = true },           -- 翻译时在光标处显示旋转提示
     cancel_key = "<Esc>",                  -- 中断在途翻译请求的按键
     incremental = true,                    -- 结果到达即增长浮窗
@@ -643,8 +655,20 @@ require("translator").setup({
         max_lines = 200,                  -- 整篇翻译的最大行数
         concurrency = 4,                  -- 并发后端进程数
     },
-    tts = { engine = "local" },            -- "local" | "say" | "google"
+    tts = {
+        engine = "local",                  -- "local" | "say" | "google"
+        url = "http://127.0.0.1:8880",     -- 本地 OpenAI 兼容服务
+        model = "mlx-community/Kokoro-82M-4bit",
+        voice = "",                        -- 空 = 按语言自动选择
+        speed = 1.0,                       -- 0.5 - 2.0
+        fallback = true,                   -- 服务不可用时回退系统音色
+        autostart = true,                  -- 首次朗读时自动拉起本地服务
+        server_cmd = { "mlx_audio.server", "--host", "127.0.0.1", "--port", "8880" },
+        server_env = {},                   -- 服务进程的额外环境变量
+        hf_mirror = true,                  -- HF_ENDPOINT=https://hf-mirror.com
+    },
     anki = { deck = "翻译", port = 8765, model = "translator" },
+    highlights = {},                       -- 覆盖面板高亮组
 })
 ```
 

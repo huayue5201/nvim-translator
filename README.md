@@ -54,8 +54,9 @@ Silicon): `make tts-setup`. See [Text-to-speech](#text-to-speech-朗诵).
 | `:TranslateTtsServer` | Start the local neural TTS service (`!` = stop) |
 | `:TranslateA` | Add the last translation to Anki (via AnkiConnect) |
 | `:TranslateCancel` | Abort the in-flight translation request |
-| `:TranslateH` | Open the translation history |
+| `:TranslateH` | Open the translation history file (requires `history.enable`) |
 | `:TranslateL` | Open the debug log |
+| `:TranslateCacheClear` | Clear the translation cache |
 
 Text source priority:
 
@@ -101,8 +102,9 @@ Options (passed as `--key=value`):
 :Translate --target_lang=en --source_lang=zh 你好
 ```
 
-A trailing `!` swaps source/target languages. It only applies when the
-languages are set explicitly; with auto direction the plugin already
+A trailing `!` swaps source/target languages for `:Translate`,
+`:TranslateW`, `:TranslateR`, `:TranslateX` and `:TranslateI`. It only applies
+when the languages are set explicitly; with auto direction the plugin already
 picks the right direction for you.
 
 ### Auto direction (双语自动互翻)
@@ -115,7 +117,8 @@ automatically, so both directions work with no flags:
 :Translate 你好      " zh -> en
 ```
 
-- Contains CJK (Chinese / kana / Hangul) → `zh → en`
+- Korean (Hangul) → `ko → en`; Japanese (kana) → `ja → en`;
+  Chinese (Han) → `zh → en`
 - Otherwise → `auto → zh`
 
 Explicit `--source_lang` / `--target_lang` override the auto detection:
@@ -154,7 +157,7 @@ Dictionary-style explanations (`explains`) and phonetics are unchanged.
 Enable it globally:
 
 ```lua
-vim.g.translator_bilingual = true
+require("translator").setup({ bilingual = true })
 ```
 
 and override per invocation with `--bilingual` / `--no-bilingual`.
@@ -583,6 +586,10 @@ Audio is played with `afplay` (macOS), `mpv` / `ffplay` / `paplay` (Linux) or
 PowerShell `SoundPlayer` (Windows). Long text is generated in batches with the
 next batch prefetched while the current one plays.
 
+`tts.server_cmd` / `tts.server_env` override the command and environment used
+by `:TranslateTtsServer`; `tts.hf_mirror` (default `true`) points Hugging Face
+downloads at `https://hf-mirror.com` unless `HF_ENDPOINT` is already set.
+
 Example keymaps:
 
 ```lua
@@ -641,9 +648,13 @@ vim.keymap.set("n", "<localLeader>tla", "<Cmd>TranslateA<CR>", { desc = "加入 
 ### Anki config
 
 ```lua
-vim.g.translator_anki_port = 8765      -- AnkiConnect port
-vim.g.translator_anki_deck = "翻译"    -- deck name (auto-created)
-vim.g.translator_anki_model = "translator" -- note type (auto-created)
+require("translator").setup({
+    anki = {
+        port = 8765,          -- AnkiConnect port
+        deck = "翻译",        -- deck name (auto-created)
+        model = "translator", -- note type (auto-created)
+    },
+})
 ```
 
 ## Configuration
@@ -653,7 +664,8 @@ require("translator").setup({
     source_lang = "auto",                  -- default source language
     target_lang = "zh",                    -- default target language
     bilingual = false,                     -- sentence-by-sentence view
-    engines = { "google", "youdao" },      -- default engines
+    engines = nil,                         -- nil = derived from target_lang:
+                                           --   zh → bing,google,haici,youdao; else google
     proxy_url = "",                        -- e.g. "socks5://127.0.0.1:1080"
     request_timeout = 15000,               -- backend request timeout (ms); <=0 = no limit
     debug = false,                         -- write logs to data dir
@@ -676,7 +688,7 @@ require("translator").setup({
         enable = true,                     -- reuse identical translations
         ttl = 7 * 24 * 60 * 60,            -- expiry seconds; 0 = never expire
     },
-    history = { enable = true },           -- persist history
+    history = { enable = false },          -- persist history (off by default)
     spinner = { enable = true },           -- cursor spinner while translating
     cancel_key = "<Esc>",                  -- key that aborts an in-flight request
     incremental = true,                    -- grow the window as results arrive
@@ -684,8 +696,20 @@ require("translator").setup({
         max_lines = 200,                  -- whole-buffer limit
         concurrency = 4,                  -- backend processes in flight
     },
-    tts = { engine = "local" },            -- "local" | "say" | "google"
+    tts = {
+        engine = "local",                  -- "local" | "say" | "google"
+        url = "http://127.0.0.1:8880",     -- local OpenAI-compatible service
+        model = "mlx-community/Kokoro-82M-4bit",
+        voice = "",                        -- "" = auto by language
+        speed = 1.0,                       -- 0.5 - 2.0
+        fallback = true,                   -- OS voice if the service is unreachable
+        autostart = true,                  -- start the local service on first speak
+        server_cmd = { "mlx_audio.server", "--host", "127.0.0.1", "--port", "8880" },
+        server_env = {},                   -- extra env for the server process
+        hf_mirror = true,                  -- HF_ENDPOINT=https://hf-mirror.com
+    },
     anki = { deck = "翻译", port = 8765, model = "translator" },
+    highlights = {},                       -- override panel highlight groups
 })
 ```
 

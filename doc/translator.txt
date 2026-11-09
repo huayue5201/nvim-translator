@@ -57,27 +57,27 @@ The default TTS engine needs the local service installed once with
 4. COMMANDS                                              *translator-commands*
 
                                                     *:Translate*
-:Translate [--key=value ...] [text]
+:Translate[!] [--key=value ...] [text]
         Translate the word / selection / text in a floating window
         (same as |:TranslateW|).
 
                                                     *:TranslateW*
-:TranslateW
+:TranslateW[!]
         Show the translation in a floating window (alias of |:Translate|).
 
                                                     *:TranslateR*
-:TranslateR
+:TranslateR[!]
         Replace the visual selection with the translation. A blockwise
         selection is translated cell by cell, each cell keeping its columns.
         Without a visual selection the word under the cursor is replaced; with
         an explicit line range (e.g. :2,5TranslateR) those lines are replaced.
 
                                                     *:TranslateX*
-:TranslateX
+:TranslateX[!]
         Translate the "* (system clipboard) register.
 
                                                     *:TranslateI*
-:TranslateI
+:TranslateI[!]
         Prompt for text, then translate it (interactive).
 
                                                     *:TranslateSay*
@@ -125,7 +125,7 @@ The default TTS engine needs the local service installed once with
 
                                                     *:TranslateH*
 :TranslateH
-        Open the translation history.
+        Open the translation history file (requires `history.enable`).
 
                                                     *:TranslateL*
 :TranslateL
@@ -146,7 +146,10 @@ Options are passed as `--key=value`: >
     :Translate --target_lang=en --source_lang=zh 你好
     :Translate --no-cache hello world        " skip the cache for this call
 <
-A trailing "!" swaps source/target languages.
+A trailing "!" swaps source/target languages for |:Translate|,
+|:TranslateW|, |:TranslateR|, |:TranslateX| and |:TranslateI|. It only applies
+when the languages are set explicitly; with auto direction the plugin already
+picks the right direction.
 
 Identical requests may be served from the cache; see |translator-cache|.
 
@@ -239,6 +242,10 @@ espeak-ng on Linux, PowerShell on Windows). If the local service is not
 reachable, playback falls back to it automatically unless
 `tts.fallback = false`. The legacy `google` engine still works but is
 rate-limited and not recommended.
+
+`tts.server_cmd` / `tts.server_env` override the command and environment used
+by |:TranslateTtsServer|; `tts.hf_mirror` (default `true`) points Hugging Face
+downloads at `https://hf-mirror.com` unless `HF_ENDPOINT` is already set.
 
 Configuration example: >
     require("translator").setup({
@@ -435,8 +442,10 @@ Suggested keymaps: >
         source_lang = "auto",                 -- default source language
         target_lang = "zh",                   -- default target language
         bilingual = false,                    -- sentence-by-sentence view
-        engines = { "google", "youdao" },     -- default engines
+        engines = nil,                        -- nil = derived from target_lang:
+                                               --   zh -> bing,google,haici,youdao; else google
         proxy_url = "",                       -- e.g. "socks5://127.0.0.1:1080"
+        request_timeout = 15000,               -- backend request timeout (ms); <=0 = no limit
         debug = false,                        -- write logs to data dir
 
         llm = { ... },                        -- OpenAI-compatible LLM config
@@ -450,7 +459,7 @@ Suggested keymaps: >
             enable = true,                    -- reuse identical translations
             ttl = 604800,                     -- seconds; 0 = never expire
         },
-        history = { enable = true },          -- persist history
+        history = { enable = false },         -- persist history (off by default)
         spinner = { enable = true },          -- cursor spinner
         cancel_key = "<Esc>",                 -- key that aborts an in-flight request
         incremental = true,                   -- grow the window as results arrive
@@ -458,7 +467,18 @@ Suggested keymaps: >
             max_lines = 200,                  -- :TranslateV whole-buffer limit
             concurrency = 4,                  -- backend processes in flight
         },
-        tts = { engine = "local" },           -- "local" | "say" | "google"
+        tts = {
+            engine = "local",                 -- "local" | "say" | "google"
+            url = "http://127.0.0.1:8880",    -- local OpenAI-compatible service
+            model = "mlx-community/Kokoro-82M-4bit",
+            voice = "",                       -- "" = auto by language
+            speed = 1.0,                      -- 0.5 - 2.0
+            fallback = true,                  -- OS voice if the service is unreachable
+            autostart = true,                 -- start the local service on first speak
+            server_cmd = { "mlx_audio.server", "--host", "127.0.0.1", "--port", "8880" },
+            server_env = {},                  -- extra env for the server process
+            hf_mirror = true,                 -- HF_ENDPOINT=https://hf-mirror.com
+        },
         anki = { deck = "翻译", port = 8765, model = "translator" },
         highlights = { ... },                 -- override panel highlights
     })
