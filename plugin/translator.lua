@@ -68,6 +68,16 @@ vim.api.nvim_create_user_command("TranslateSay", function(opts)
 	require("translator.tts").say(opts.bang, opts)
 end, { bang = true, range = true })
 
+-- Start the local TTS service (`!` stops it).
+vim.api.nvim_create_user_command("TranslateTtsServer", function(opts)
+	local tts = require("translator.tts")
+	if opts.bang then
+		tts.stop_server()
+	else
+		tts.start_server()
+	end
+end, { bang = true })
+
 vim.api.nvim_create_user_command("TranslateA", function()
 	require("translator.anki").add()
 end, {})

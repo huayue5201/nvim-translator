@@ -32,6 +32,9 @@ make build
 
 `make build` 会执行 `cargo build --release` 并把二进制复制到 `bin/translator`。
 
+默认 TTS 引擎需要一次性安装本地服务(macOS / Apple Silicon):
+`make tts-setup`。详见[文本转语音](#文本转语音朗诵)。
+
 ## 用法
 
 | 命令 | 作用 |
@@ -46,6 +49,7 @@ make build
 | `:TranslateV` | 在 buffer 内用虚拟文本逐行显示中英对照(整篇 / 选区,再次执行关闭) |
 | `:TranslateVClear` | 清除所有虚拟译文 |
 | `:TranslateSay` | 朗读原文(`!` = 朗读译文) |
+| `:TranslateTtsServer` | 启动本地神经 TTS 服务(`!` = 停止) |
 | `:TranslateA` | 把上次翻译加入 Anki(通过 AnkiConnect) |
 | `:TranslateCancel` | 中断正在进行的翻译请求 |
 | `:TranslateH` | 打开翻译历史 |
@@ -491,6 +495,7 @@ vim.keymap.set("v", "<localLeader>td", ":TranslateExplain<CR>", { desc = "AI 解
 | 命令 | 作用 |
 | ------------------ | ------------------------------------ |
 | `:TranslateSay` | 朗读原文(单词/句子) |
+| `:TranslateTtsServer` | 启动本地神经 TTS 服务(`!` = 停止) |
 | `:TranslateSay!` | 朗读译文(目标语言) |
 
 `TranslateSay` 朗读**上次翻译的文本**(如果还没翻译过,则朗读光标下单词 /
@@ -499,18 +504,45 @@ vim.keymap.set("v", "<localLeader>td", ":TranslateExplain<CR>", { desc = "AI 解
 ### TTS 引擎
 
 ```lua
-vim.g.translator_tts_engine = "say"   -- "say"(本地,默认) | "google"(在线)
+require("translator").setup({
+  tts = {
+    engine = "local",                                 -- "local" | "say" | "google"
+    url = "http://127.0.0.1:8880",                    -- 本地服务地址
+    model = "mlx-community/Kokoro-82M-4bit",
+    voice = "",                                       -- 空 = 按语言自动选择
+    speed = 1.0,                                      -- 0.5 - 2.0
+    fallback = true,                                  -- 服务不可用时回退系统音色
+    autostart = true,                                 -- 首次朗读时自动拉起服务
+  },
+})
 ```
 
-- **`say`(默认)** —— 使用操作系统内置 TTS,无需网络和额外依赖:
-  - macOS:`say`(内置,支持 en_US + zh_CN 语音)
-  - Linux:`espeak-ng` / `espeak` / `spd-say`(安装其一,如
-    `sudo apt install espeak-ng`)
-  - Windows:PowerShell `System.Speech`
-- **`google`** —— 在线 Google TTS,语音更自然,需要网络和音频播放器:
-  - macOS:`afplay`(内置)
-  - Linux:`mpv` / `ffplay` / `aplay`
-  - Windows:PowerShell `SoundPlayer`
+- **`local`(默认)** —— 本地 OpenAI 兼容 TTS 服务
+  ([mlx-audio](https://github.com/Blaizzy/mlx-audio) + Kokoro-82M),神经语音,
+  完全离线,Apple Silicon 上约 10 倍实时速度。
+  - 安装(macOS / Apple Silicon):`make tts-setup`,或手动:
+    ```sh
+    brew install ffmpeg
+    uv tool install mlx-audio
+    VP="$(uv tool dir)/mlx-audio/bin/python"
+    uv pip install --python "$VP" \
+      uvicorn fastapi webrtcvad python-multipart "setuptools<81" "misaki[en]"
+    # G2P 模型(spacy.cli.download 不可靠,直接装 wheel)
+    curl -LO https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+    uv pip install --python "$VP" ./en_core_web_sm-3.8.0-py3-none-any.whl
+    ```
+  - 用 `:TranslateTtsServer` 启动(`:TranslateTtsServer!` 停止),或交给
+    `autostart` 自动启动。
+  - 音色:`af_heart`(英文默认)、`af_bella`、`am_michael`、`bf_emma`、
+    `bm_george`。任何 OpenAI 兼容服务都可用,改 `url` 即可。
+  - 服务不可用时会自动回退到系统音色。
+- **`say`** —— 系统音色,零部署但音质一般。使用前建议先在「系统设置 → 辅助
+  功能 → 朗读内容 → 系统声音」下载 Enhanced/Premium 音色。
+- **`google`** —— 旧版在线 Google 接口,易被限流,仅为兼容保留。
+
+播放使用 `afplay`(macOS)、`mpv` / `ffplay` / `paplay`(Linux)或
+PowerShell `SoundPlayer`(Windows)。长文本按批次生成,播放当前批次时会预取
+下一批。
 
 示例按键映射:
 
@@ -611,7 +643,7 @@ require("translator").setup({
         max_lines = 200,                  -- 整篇翻译的最大行数
         concurrency = 4,                  -- 并发后端进程数
     },
-    tts = { engine = "say" },              -- "say" | "google"
+    tts = { engine = "local" },            -- "local" | "say" | "google"
     anki = { deck = "翻译", port = 8765, model = "translator" },
 })
 ```
@@ -642,6 +674,7 @@ make build      # cargo build --release && 安装到 bin/
 make test       # cargo test(响应解析器的离线单元测试)
 make test-user  # 用户级场景测试(真实命令 + <Esc>,慢速假后端)
 make lint       # stylua --check + luacheck
+make tts-setup  # 安装本地 TTS 服务(mlx-audio + Kokoro)
 make clean
 ```
 

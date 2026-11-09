@@ -1,4 +1,4 @@
-.PHONY: build test test-user lint clean
+.PHONY: build test test-user lint clean tts-setup
 
 # Build the Rust backend and install it to ./bin/translator
 build:
@@ -17,6 +17,9 @@ lint:
 # User-level scenarios: real commands, real <Esc>, slow fake backend.
 test-user:
 	@test/user/run.sh
+
+tts-setup:
+	./scripts/tts-setup.sh
 
 clean:
 	cd rust && cargo clean

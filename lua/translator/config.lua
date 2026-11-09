@@ -53,10 +53,22 @@ M.llm_presets = {
 ---@field history { enable: boolean }
 ---@field spinner translator.SpinnerConfig
 ---@field cancel_key string|false -- key that aborts an in-flight request; false disables
----@field tts { engine: "say"|"google" }
+---@field tts translator.TtsConfig
 ---@field anki translator.AnkiConfig
 ---@field highlights table
 ---@field debug boolean
+
+---@class translator.TtsConfig
+---@field engine "local"|"say"|"google"
+---@field url string
+---@field model string
+---@field voice string
+---@field speed number
+---@field fallback boolean
+---@field autostart boolean
+---@field server_cmd string[]
+---@field server_env table<string,string>
+---@field hf_mirror boolean
 
 local defaults = {
 	source_lang = "auto",
@@ -112,7 +124,22 @@ local defaults = {
 	-- 用户自己的映射会在取消结束后恢复。
 	cancel_key = "<Esc>",
 	tts = {
-		engine = "say",
+		engine = "local",
+		-- OpenAI-compatible local TTS service (mlx-audio + Kokoro by default).
+		url = "http://127.0.0.1:8880",
+		model = "mlx-community/Kokoro-82M-4bit",
+		-- Empty = pick a default voice for the language (af_heart / zf_xiaobei).
+		voice = "",
+		speed = 1.0,
+		-- Use the OS voice when the local service is unreachable.
+		fallback = true,
+		-- Start the local service automatically on the first :TranslateSay.
+		autostart = true,
+		-- Command used by `:TranslateTtsServer`.
+		server_cmd = { "mlx_audio.server", "--host", "127.0.0.1", "--port", "8880" },
+		server_env = {},
+		-- Point HF downloads at a mirror (helps in CN). Set to false to disable.
+		hf_mirror = true,
 	},
 	anki = {
 		port = 8765,

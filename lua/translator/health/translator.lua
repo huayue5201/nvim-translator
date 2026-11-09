@@ -39,6 +39,29 @@ local function check_proxy()
 end
 
 ---------------------------------------------------------------------
+-- Check TTS setup
+---------------------------------------------------------------------
+local function check_tts()
+	local cfg = require("translator.config").get().tts or {}
+	local engine = cfg.engine or "local"
+
+	if engine ~= "local" then
+		vim.health.ok(("TTS engine: %s"):format(engine))
+		return
+	end
+
+	local tts = require("translator.tts")
+	if tts.server_alive() then
+		vim.health.ok(("TTS service reachable at %s"):format(cfg.url or "http://127.0.0.1:8880"))
+	else
+		vim.health.warn(
+			("TTS service not reachable at %s"):format(cfg.url or "http://127.0.0.1:8880"),
+			"Run `:TranslateTtsServer` or `make tts-setup`; playback falls back to the OS voice meanwhile."
+		)
+	end
+end
+
+---------------------------------------------------------------------
 -- Main entry
 ---------------------------------------------------------------------
 function M.check()
@@ -46,6 +69,7 @@ function M.check()
 
 	check_binary()
 	check_proxy()
+	check_tts()
 
 	vim.health.ok("Neovim floating window support detected")
 	vim.health.ok("Async job support detected")

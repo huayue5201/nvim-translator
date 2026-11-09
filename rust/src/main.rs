@@ -79,9 +79,30 @@ struct SpeakArgs {
     #[arg(long, default_value = "en")]
     lang: String,
 
-    /// TTS engine: "say" (local) or "google" (online).
-    #[arg(long, default_value = "say")]
+    /// TTS engine: "local" (OpenAI-compatible HTTP service), "say" (OS built-in)
+    /// or "google" (online, legacy).
+    #[arg(long, default_value = "local")]
     engine: String,
+
+    /// Voice id, e.g. `af_heart` (Kokoro). Defaults to a per-language voice.
+    #[arg(long)]
+    voice: Option<String>,
+
+    /// Playback speed multiplier.
+    #[arg(long, default_value_t = 1.0)]
+    speed: f32,
+
+    /// Base URL of the local TTS service.
+    #[arg(long, default_value = "http://127.0.0.1:8880")]
+    tts_url: String,
+
+    /// Model id sent to the local TTS service.
+    #[arg(long, default_value = "mlx-community/Kokoro-82M-4bit")]
+    tts_model: String,
+
+    /// Fall back to the OS voice when the local service is unreachable.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    fallback: bool,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -292,6 +313,16 @@ fn main() {
     let cli = Cli::parse();
     match cli.command {
         Command::Translate(args) => run_translate(args),
-        Command::Speak(args) => tts::speak(&args.text, &args.lang, &args.engine),
+        Command::Speak(args) => {
+            let opts = tts::Options {
+                engine: args.engine,
+                voice: args.voice,
+                speed: args.speed,
+                url: args.tts_url,
+                model: args.tts_model,
+                fallback: args.fallback,
+            };
+            tts::speak(&args.text, &args.lang, &opts);
+        }
     }
 }

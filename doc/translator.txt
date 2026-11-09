@@ -7,11 +7,12 @@ CONTENTS                                                     *translator*
 2. Requirements ..................................... |translator-requirements|
 3. Install .......................................... |translator-install|
 4. Commands ......................................... |translator-commands|
-5. Engines .......................................... |translator-engines|
-6. API documentation translation ..................... |translator-api|
-7. Code explanation ................................. |translator-explain|
-8. Configuration .................................... |translator-config|
-9. Development ...................................... |translator-development|
+5. Text-to-speech ................................... |translator-tts|
+6. Engines .......................................... |translator-engines|
+7. API documentation translation ..................... |translator-api|
+8. Code explanation ................................. |translator-explain|
+9. Configuration .................................... |translator-config|
+10. Development ..................................... |translator-development|
 
 ==============================================================================
 1. INTRODUCTION                                            *translator-intro*
@@ -49,6 +50,9 @@ Or manually: >
 `make build` runs `cargo build --release` and copies the binary to
 `bin/translator`.
 
+The default TTS engine needs the local service installed once with
+`make tts-setup` (macOS / Apple Silicon). See |translator-tts|.
+
 ==============================================================================
 4. COMMANDS                                              *translator-commands*
 
@@ -79,6 +83,12 @@ Or manually: >
                                                     *:TranslateSay*
 :TranslateSay[!]
         Speak the source text ("!" speaks the translation).
+        Uses the local neural TTS service when available, otherwise the
+        OS voice. See |translator-tts|.
+
+                                                    *:TranslateTtsServer*
+:TranslateTtsServer[!]
+        Start the local TTS service ("!" stops it).
 
                                                     *:TranslateA*
 :TranslateA
@@ -200,7 +210,51 @@ disappears once everything is in; the window only grows, never jumps. Set
 floating-window display modes (`:Translate` / `:TranslateI`).
 
 ==============================================================================
-5. ENGINES                                                *translator-engines*
+5. TEXT-TO-SPEECH                                            *translator-tts*
+
+:TranslateSay speaks the last translated text (or the word under the cursor /
+visual selection) and :TranslateSay! speaks the translation. Text is split into
+batches; the next batch is generated while the current one plays.
+
+The default engine is `local`: an OpenAI-compatible TTS service on
+http://127.0.0.1:8880, normally mlx-audio serving Kokoro-82M. It is neural,
+fully offline, and runs about 10x faster than realtime on Apple Silicon.
+
+Setup (macOS / Apple Silicon): run `make tts-setup`, which installs ffmpeg,
+mlx-audio, the server extras and the en_core_web_sm G2P model (spacy's own
+downloader is unreliable). Equivalent manual steps: >
+    brew install ffmpeg
+    uv tool install mlx-audio
+    VP="$(uv tool dir)/mlx-audio/bin/python"
+    uv pip install --python "$VP" \
+      uvicorn fastapi webrtcvad python-multipart "setuptools<81" "misaki[en]"
+    uv pip install --python "$VP" ./en_core_web_sm-3.8.0-py3-none-any.whl
+<
+Then either run |:TranslateTtsServer| yourself or leave `autostart = true`.
+To choose a voice, set `tts.voice` (e.g. `af_heart`, `af_bella`, `am_michael`,
+`bf_emma`); an empty string picks a default per language.
+
+Set `tts.engine = "say"` to use the OS voice instead (macOS `say`,
+espeak-ng on Linux, PowerShell on Windows). If the local service is not
+reachable, playback falls back to it automatically unless
+`tts.fallback = false`. The legacy `google` engine still works but is
+rate-limited and not recommended.
+
+Configuration example: >
+    require("translator").setup({
+        tts = {
+            engine = "local",
+            url = "http://127.0.0.1:8880",
+            model = "mlx-community/Kokoro-82M-4bit",
+            voice = "",
+            speed = 1.0,
+            fallback = true,
+            autostart = true,
+        },
+    })
+<
+==============================================================================
+6. ENGINES                                                *translator-engines*
 
 `google`, `youdao`, `baidu`, `bing`, `baicizhan`, `haici`, `iciba`,
 `trans` (translate-shell CLI), `sdcv` (StarDict CLI), `llm`
@@ -308,7 +362,7 @@ stops llama-server once the activity stamp is older than the idle timeout
 > prefer it as an offline fallback rather than the sole engine.
 
 ==============================================================================
-6. API DOCUMENTATION TRANSLATION                            *translator-api*
+7. API DOCUMENTATION TRANSLATION                            *translator-api*
 
                                                           *:TranslateApi*
 `:TranslateApi` translates a code API symbol together with its documentation,
@@ -347,8 +401,7 @@ Suggested keymaps: >
 <
 
 ==============================================================================
-7. CODE EXPLANATION                                        *translator-explain*
-                                                      *:TranslateExplain*
+8. CODE EXPLANATION                                        *translator-explain*
 `:TranslateExplain` sends the code around the cursor to the configured LLM and
 shows an explanation, so the context does not have to be copied into a chat
 window by hand. With a visual selection the selected lines are sent verbatim.
@@ -374,7 +427,7 @@ Suggested keymaps: >
 <
 
 ==============================================================================
-8. CONFIGURATION                                          *translator-config*
+9. CONFIGURATION                                          *translator-config*
 
                                                           *translator.setup()*
 >
@@ -405,7 +458,7 @@ Suggested keymaps: >
             max_lines = 200,                  -- :TranslateV whole-buffer limit
             concurrency = 4,                  -- backend processes in flight
         },
-        tts = { engine = "say" },             -- "say" | "google"
+        tts = { engine = "local" },           -- "local" | "say" | "google"
         anki = { deck = "翻译", port = 8765, model = "translator" },
         highlights = { ... },                 -- override panel highlights
     })
@@ -452,7 +505,7 @@ override them. To customise: >
 <
 
 ==============================================================================
-9. DEVELOPMENT                                         *translator-development*
+10. DEVELOPMENT                                        *translator-development*
 
                                                         *translator-make*
 >

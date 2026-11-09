@@ -34,6 +34,9 @@ make build
 `make build` runs `cargo build --release` and copies the binary to
 `bin/translator`.
 
+The default TTS engine needs a one-time local service install (macOS, Apple
+Silicon): `make tts-setup`. See [Text-to-speech](#text-to-speech-朗诵).
+
 ## Usage
 
 | Command | Action |
@@ -48,6 +51,7 @@ make build
 | `:TranslateV` | Toggle in-buffer bilingual virtual lines for the buffer / range |
 | `:TranslateVClear` | Remove every virtual translation |
 | `:TranslateSay` | Speak the source text (`!` = speak the translation) |
+| `:TranslateTtsServer` | Start the local neural TTS service (`!` = stop) |
 | `:TranslateA` | Add the last translation to Anki (via AnkiConnect) |
 | `:TranslateCancel` | Abort the in-flight translation request |
 | `:TranslateH` | Open the translation history |
@@ -527,6 +531,7 @@ Speak the source text or the translation.
 | Command | Action |
 | ------------------ | ------------------------------------ |
 | `:TranslateSay` | Speak the source text (word/sentence) |
+| `:TranslateTtsServer` | Start the local neural TTS service (`!` = stop) |
 | `:TranslateSay!` | Speak the translation (target lang) |
 
 `TranslateSay` speaks the **last translated text** (or, if you haven't
@@ -536,20 +541,47 @@ speaks the translation in the target language.
 ### TTS engines
 
 ```lua
-vim.g.translator_tts_engine = "say"   -- "say" (local, default) | "google" (online)
+require("translator").setup({
+  tts = {
+    engine = "local",                                 -- "local" | "say" | "google"
+    url = "http://127.0.0.1:8880",                    -- local service base URL
+    model = "mlx-community/Kokoro-82M-4bit",
+    voice = "",                                       -- "" = auto by language
+    speed = 1.0,                                      -- 0.5 - 2.0
+    fallback = true,                                  -- OS voice if service is down
+    autostart = true,                                 -- start service on first speak
+  },
+})
 ```
 
-- **`say` (default)** — uses the OS's built-in TTS, no network, no extra
-  dependencies:
-  - macOS: `say` (built in, has en_US + zh_CN voices)
-  - Linux: `espeak-ng` / `espeak` / `spd-say` (install one, e.g.
-    `sudo apt install espeak-ng`)
-  - Windows: PowerShell `System.Speech`
-- **`google`** — online Google TTS, more natural voices, requires network and
-  an audio player:
-  - macOS: `afplay` (built in)
-  - Linux: `mpv` / `ffplay` / `aplay`
-  - Windows: PowerShell `SoundPlayer`
+- **`local` (default)** — a local OpenAI-compatible TTS service
+  ([mlx-audio](https://github.com/Blaizzy/mlx-audio) + Kokoro-82M). Neural
+  quality, fully offline, ~10x faster than realtime on Apple Silicon.
+  - Install (macOS / Apple Silicon): `make tts-setup`, or by hand:
+    ```sh
+    brew install ffmpeg
+    uv tool install mlx-audio
+    VP="$(uv tool dir)/mlx-audio/bin/python"
+    uv pip install --python "$VP" \
+      uvicorn fastapi webrtcvad python-multipart "setuptools<81" "misaki[en]"
+    # G2P model (spacy.cli.download is unreliable; install the wheel directly)
+    curl -LO https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+    uv pip install --python "$VP" ./en_core_web_sm-3.8.0-py3-none-any.whl
+    ```
+  - Start it with `:TranslateTtsServer` (`:TranslateTtsServer!` stops it), or
+    let `autostart` handle it.
+  - Voices: `af_heart` (default en), `af_bella`, `am_michael`, `bf_emma`,
+    `bm_george`. Any OpenAI-compatible server works — set `url` accordingly.
+  - If the service is unreachable, playback falls back to the OS voice.
+- **`say`** — the OS voice, zero setup, lower quality. Prefer downloading an
+  Enhanced/Premium voice in *System Settings → Accessibility → Spoken Content*
+  before using it.
+- **`google`** — the legacy online Google Translate endpoint. Rate-limited and
+  not recommended; kept for compatibility.
+
+Audio is played with `afplay` (macOS), `mpv` / `ffplay` / `paplay` (Linux) or
+PowerShell `SoundPlayer` (Windows). Long text is generated in batches with the
+next batch prefetched while the current one plays.
 
 Example keymaps:
 
@@ -652,7 +684,7 @@ require("translator").setup({
         max_lines = 200,                  -- whole-buffer limit
         concurrency = 4,                  -- backend processes in flight
     },
-    tts = { engine = "say" },              -- "say" | "google"
+    tts = { engine = "local" },            -- "local" | "say" | "google"
     anki = { deck = "翻译", port = 8765, model = "translator" },
 })
 ```
@@ -688,6 +720,7 @@ make build      # cargo build --release && install to bin/
 make test       # cargo test (offline unit tests for response parsers)
 make test-user  # user-level scenarios (real commands + <Esc>, slow fake backend)
 make lint       # stylua --check + luacheck
+make tts-setup  # install the local TTS service (mlx-audio + Kokoro)
 make clean
 ```
 
