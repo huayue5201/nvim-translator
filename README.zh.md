@@ -13,20 +13,27 @@
 
 ## 安装
 
-使用你喜欢的插件管理器安装,然后构建后端:
+使用你喜欢的插件管理器安装,然后构建后端。
 
-```sh
-# lazy.nvim
+使用 lazy.nvim:
+
+```lua
 {
   "huayue5201/nvim-translator",
   build = "make build",
 }
 ```
 
-或手动构建:
+使用 `vim.pack`(Neovim 0.12+):
+
+```lua
+vim.pack.add({ "https://github.com/huayue5201/nvim-translator" })
+-- 然后在插件目录执行 `make build`
+```
+
+或在插件目录手动构建:
 
 ```sh
-cd path/to/nvim-translator
 make build
 ```
 

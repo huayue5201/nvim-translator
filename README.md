@@ -14,20 +14,27 @@ Python required); Neovim talks to it via `jobstart` using an
 
 ## Install
 
-Use your favourite plugin manager, then build the backend:
+Use your favourite plugin manager, then build the backend.
 
-```sh
-# with lazy.nvim
+With lazy.nvim:
+
+```lua
 {
   "huayue5201/nvim-translator",
   build = "make build",
 }
 ```
 
-Or manually:
+With `vim.pack` (Neovim 0.12+):
+
+```lua
+vim.pack.add({ "https://github.com/huayue5201/nvim-translator" })
+-- then run `make build` in the plugin directory
+```
+
+Or manually, in the plugin directory:
 
 ```sh
-cd path/to/nvim-translator
 make build
 ```
 
