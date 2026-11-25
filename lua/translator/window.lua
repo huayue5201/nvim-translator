@@ -146,6 +146,11 @@ function M.update(lines, center)
 	return require("translator.window.float").update(lines, cfg)
 end
 
+--- Remember which window the next peek belongs to.
+function M.set_source(win)
+	require("translator.window.float").set_source(win)
+end
+
 --- Close whichever translation window is currently open.
 function M.close()
 	require("translator.window.float").close()

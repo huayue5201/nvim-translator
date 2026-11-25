@@ -19,8 +19,23 @@ local state_win = {
 	aug = "translator_float_close",
 }
 
+-- Window the peek float belongs to (captured when the request starts, not
+-- when the result arrives). The peek is a cursor-following overlay, so it
+-- makes no sense once that window is gone: close it instead of leaving an
+-- orphan floating in the editor.
+local source_win = nil
+
 local function win_valid(win)
 	return win and vim.api.nvim_win_is_valid(win)
+end
+
+--- Remember the window that owns the next translation peek.
+function M.set_source(win)
+	source_win = win
+end
+
+local function source_valid()
+	return source_win == nil or win_valid(source_win)
 end
 
 -- Forward declaration: secondary actions install_maps/add_anki refer to it.
@@ -153,6 +168,7 @@ close = function()
 	state_win.win = nil
 	state_win.buf = nil
 	state_win.relative = nil
+	state_win.source = nil
 	clear_maps()
 	pcall(vim.api.nvim_del_augroup_by_name, state_win.aug)
 	state_win.aug = "translator_float_close"
@@ -163,6 +179,12 @@ end
 ---------------------------------------------------------------------
 local function build(lines, cfg, enter, win_cfg)
 	close()
+
+	-- The source window disappeared while the request was in flight: do not
+	-- resurrect a peek that would follow an unrelated window.
+	if win_cfg.track_source and not source_valid() then
+		return nil
+	end
 
 	-- 对内容进行居中排版
 	lines = util.fit_lines(lines, cfg.width)
@@ -176,6 +198,9 @@ local function build(lines, cfg, enter, win_cfg)
 	-- 单层浮窗，使用 double border
 	state_win.buf = bufnr
 	state_win.relative = win_cfg.relative
+	local track_source = win_cfg.track_source
+	local win_opts = vim.deepcopy(win_cfg)
+	win_opts.track_source = nil
 	state_win.win = vim.api.nvim_open_win(
 		bufnr,
 		enter,
@@ -185,8 +210,9 @@ local function build(lines, cfg, enter, win_cfg)
 			style = "minimal",
 			border = "rounded",
 			zindex = 100,
-		}, win_cfg)
+		}, win_opts)
 	)
+	state_win.source = track_source and source_win or nil
 	vim.wo[state_win.win].winhl = "Normal:Translator"
 
 	return state_win.win, bufnr
@@ -219,6 +245,12 @@ end
 ---@return boolean updated
 function M.update(lines, cfg)
 	if not win_valid(state_win.win) then
+		return false
+	end
+	-- Source window closed while results were still streaming: tear the peek
+	-- down instead of updating a window nobody is looking at.
+	if state_win.source and not win_valid(state_win.source) then
+		close()
 		return false
 	end
 	local bufnr = state_win.buf
@@ -257,7 +289,11 @@ function M.create(lines, cfg)
 		focusable = false,
 		footer = footer(),
 		footer_pos = "center",
+		track_source = true,
 	})
+	if not win then
+		return nil
+	end
 
 	install_maps()
 
@@ -278,6 +314,18 @@ function M.create(lines, cfg)
 		end,
 	})
 
+	-- Close the peek as soon as the window it belongs to goes away, even if no
+	-- cursor movement follows (this is what left an orphan float behind).
+	if source_win then
+		vim.api.nvim_create_autocmd("WinClosed", {
+			group = aug,
+			pattern = tostring(source_win),
+			callback = function()
+				async.delay(10, close)
+			end,
+		})
+	end
+
 	return win
 end
 
@@ -293,6 +341,9 @@ function M.create_interactive(lines, cfg)
 		col = cfg.col,
 		focusable = true,
 	})
+	if not win then
+		return nil
+	end
 
 	local map_opts = { buffer = bufnr, silent = true, nowait = true }
 	vim.keymap.set("n", "q", close, map_opts)

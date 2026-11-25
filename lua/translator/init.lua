@@ -295,6 +295,9 @@ function M.translate(options, displaymode)
 		return
 	end
 
+	-- 记住发起翻译的窗口：翻译浮窗依附于它，窗口关闭后浮窗随之关闭。
+	require("translator.window").set_source(vim.api.nvim_get_current_win())
+
 	local env = build_backend_env()
 
 	if options.block_cells and #options.block_cells > 1 then
